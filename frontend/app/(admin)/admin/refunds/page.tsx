@@ -51,8 +51,8 @@ export default function RefundsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to load refunds");
       setRefunds(data.refunds || []);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load refunds");
     } finally {
       setLoading(false);
     }
@@ -83,8 +83,8 @@ export default function RefundsPage() {
         prev.map((r) => (r.id === activeRefund.id ? { ...r, ...data.refund } : r))
       );
       setActiveRefund(null);
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Refund action failed");
     } finally {
       setActionLoading(false);
     }
@@ -127,7 +127,7 @@ export default function RefundsPage() {
                 </div>
                 <div className="text-right space-y-2">
                   <div className="font-bold text-xl">{formatINR(r.refund_amount)}</div>
-                  <Badge variant={r.status === "REQUESTED" ? "secondary" : r.status === "APPROVED" ? "success" : "destructive"}>
+                  <Badge variant={r.status === "REQUESTED" ? "accent" : r.status === "APPROVED" ? "success" : "destructive"}>
                     {r.status}
                   </Badge>
                   {r.status === "REQUESTED" && (
@@ -135,7 +135,7 @@ export default function RefundsPage() {
                       <Button size="sm" variant="outline" className="text-destructive border-destructive hover:bg-destructive hover:text-white" onClick={() => { setActiveRefund(r); setActionType("REJECT"); setAdminResponse(""); }}>
                         Reject
                       </Button>
-                      <Button size="sm" variant="default" className="bg-primary" onClick={() => { setActiveRefund(r); setActionType("APPROVE"); setAdminResponse("Refund Approved."); }}>
+                      <Button size="sm" variant="primary" onClick={() => { setActiveRefund(r); setActionType("APPROVE"); setAdminResponse("Refund Approved."); }}>
                         Approve
                       </Button>
                     </div>
@@ -147,7 +147,7 @@ export default function RefundsPage() {
         </div>
       )}
 
-      <Dialog open={!!activeRefund} onOpenChange={(open) => !open && setActiveRefund(null)}>
+      <Dialog open={!!activeRefund} onOpenChange={(open: boolean) => !open && setActiveRefund(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
@@ -166,7 +166,7 @@ export default function RefundsPage() {
             />
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setActiveRefund(null)}>Cancel</Button>
-              <Button variant={actionType === "REJECT" ? "destructive" : "default"} onClick={handleAction} disabled={actionLoading}>
+              <Button variant={actionType === "REJECT" ? "destructive" : "primary"} onClick={handleAction} disabled={actionLoading}>
                 {actionLoading ? "Processing..." : `Confirm ${actionType}`}
               </Button>
             </div>
