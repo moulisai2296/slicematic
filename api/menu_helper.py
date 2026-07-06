@@ -11,7 +11,7 @@ def get_current_menu_version():
         try:
             with postgres.connect() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("select value from public.app_settings where id = 'menu_version'")
+                    cur.execute("select value from public.app_settings where key = 'menu_version'")
                     row = cur.fetchone()
                     if row:
                         current_version = int(row[0].get("value", 1))

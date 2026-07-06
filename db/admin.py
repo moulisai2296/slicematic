@@ -1383,6 +1383,28 @@ def decide_inventory_request(
     return updated
 
 
+def _increment_menu_version(cur) -> None:
+    cur.execute("select value from public.app_settings where key = 'menu_version'")
+    row = _one(cur)
+    if row:
+        current = int(row.get("value", {}).get("value", 1))
+        cur.execute(
+            """
+            update public.app_settings
+            set value = jsonb_build_object('value', %s::integer), updated_at = now()
+            where key = 'menu_version'
+            """,
+            (current + 1,),
+        )
+    else:
+        cur.execute(
+            """
+            insert into public.app_settings (key, value, updated_at)
+            values ('menu_version', jsonb_build_object('value', 2), now())
+            """
+        )
+
+
 def list_menu_items() -> dict:
     _ensure_postgres()
     with postgres.connect() as conn:
@@ -1391,7 +1413,7 @@ def list_menu_items() -> dict:
                 """
                 select mi.id, mi.item_code, c.code as category, c.name as category_name,
                        mi.name, mi.price, mi.is_available, mi.is_deleted,
-                       mi.updated_at
+                       mi.image_url, mi.updated_at
                 from public.menu_items mi
                 join public.menu_categories c on c.id = mi.category_id
                 where mi.is_deleted = false
@@ -1453,6 +1475,7 @@ def create_menu_category(
                 performed_by=performed_by,
                 reason=reason,
             )
+            _increment_menu_version(cur)
     return category
 
 
@@ -1494,6 +1517,7 @@ def delete_menu_category(category_id: str, performed_by: str) -> dict:
                 performed_by=performed_by,
                 reason="Admin hard delete",
             )
+            _increment_menu_version(cur)
     return deleted_cat
 
 
@@ -1562,6 +1586,7 @@ def create_menu_item(
                 performed_by=performed_by,
                 reason=reason,
             )
+            _increment_menu_version(cur)
     return item
 
 
@@ -1644,6 +1669,7 @@ def update_menu_item(
                 performed_by=performed_by,
                 reason=reason,
             )
+            _increment_menu_version(cur)
     return updated
 
 
@@ -1688,6 +1714,7 @@ def soft_delete_menu_item(
                 performed_by=performed_by,
                 reason=reason,
             )
+            _increment_menu_version(cur)
     return updated
 
 
