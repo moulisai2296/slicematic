@@ -514,6 +514,10 @@ def scores(days: int = 7) -> list[dict]:
                     "id": s.id,
                     "name": s.name,
                     "value": s.value,
+                    # CATEGORICAL scores (model_used, guardrail_category) keep
+                    # their real label here — the numeric `value` is only
+                    # Langfuse's category index and is meaningless on its own.
+                    "string_value": getattr(s, "string_value", None),
                     "session_id": s.session_id,
                     "trace_id": s.trace_id,
                     "comment": s.comment,
