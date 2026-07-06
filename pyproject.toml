@@ -5,12 +5,13 @@ requires-python = ">=3.12"
 dependencies = [
     "bcrypt>=5.0.0",
     "fastapi>=0.138.1",
-    "gradio>=6.19.0",
     "langfuse>=4.12.0",
     "openai>=2.44.0",
+    "pandas>=3.0.3",
     "psycopg[binary]>=3.3.4",
     "pyjwt>=2.13.0",
     "python-dotenv>=1.2.2",
+    "python-multipart>=0.0.32",
     "sarvamai>=0.1.28",
     "supabase>=2.31.0",
     "uvicorn[standard]>=0.49.0",
@@ -37,12 +38,12 @@ target-version = ["py312"]
 [tool.ruff]
 line-length = 88
 target-version = "py312"
-# Default select (E, F) only — no import/format rules that overlap isort/black.
+# Default select (E, F) only â€” no import/format rules that overlap isort/black.
 extend-exclude = [".venv", "node_modules", "ppt", "scripts"]
 
 [tool.bandit]
 exclude_dirs = [".venv", "node_modules", "ppt", "scripts", "tests"]
-# B104: binding 0.0.0.0 is intentional for Hugging Face Spaces.
+# B104: binding 0.0.0.0 is intentional for hosted backend deployments.
 # B110: try/except/pass is a deliberate graceful-degradation pattern in additive
-#       (non-graded) paths — e.g. optional .env load, optional analytics filter.
+#       optional paths â€” e.g. optional .env load, optional analytics filter.
 skips = ["B104", "B110"]

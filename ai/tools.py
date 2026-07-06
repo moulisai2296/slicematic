@@ -3,8 +3,8 @@
 Each tool returns a string for the LLM (JSON on deterministic successes the
 agent injects verbatim). All money is computed by core/pricing.py; the menu
 comes from core/menu.py. Chat/voice orders are saved to Supabase ONLY
-(db.orders.create_order — same DECIDED path as /api/cart/checkout, DB-generated
-order_no, user_id-stamped); orders_log.txt belongs to the graded Gradio app.
+(db.orders.create_order â€” same DECIDED path as /api/cart/checkout, DB-generated
+order_no, user_id-stamped); orders_log.txt is retained only for historical flat-file compatibility.
 The LLM never computes prices and may only use item IDs that exist in the menu.
 """
 
@@ -18,12 +18,13 @@ import os
 from ai import guardrails, observability
 
 # Shared live-menu resolver (default/custom) + the multi-topping fuser the cart
-# endpoints already use — one MenuItem with summed menu prices for compute_bill.
-from api.routes import _combined_topping, _load_active_menu
+# endpoints already use â€” one MenuItem with summed menu prices for compute_bill.
+from api.routes import _load_active_menu
+from api.cart_helper import resolve_cart_line, cart_line_to_dict, CartLineReq
 from core import pricing
 from core import validation as v
 from core.menu import MenuError
-from core.models import Bill, MenuItem
+from core.models import Bill, MenuItem, BillItem
 
 try:
     from db import escalations as db_escalations
@@ -46,16 +47,18 @@ log = logging.getLogger(__name__)
 _ITEM_SCHEMA = {
     "type": "object",
     "properties": {
-        "base_id": {"type": "string", "description": "Base ID from the menu"},
-        "pizza_id": {"type": "string", "description": "Pizza ID from the menu"},
+        "item_id": {"type": "string", "description": "Item ID from the menu"},
+        "item_type": {"type": "string", "description": "Category of the item (e.g. pizza, beverage)"},
+        "size_code": {"type": "string", "description": "Size code (e.g. M, L), required if the item has sizes"},
+        "crust_id": {"type": "string", "description": "Crust/Base ID from the menu (only for pizzas)"},
         "topping_ids": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "Array of Topping IDs from the menu (up to 3)",
+            "description": "Array of Topping IDs from the menu (up to 3, only for pizzas)",
         },
         "quantity": {"type": "integer", "description": "Quantity, 1-10"},
     },
-    "required": ["base_id", "pizza_id", "topping_ids", "quantity"],
+    "required": ["item_id", "quantity"],
 }
 
 TOOL_DEFINITIONS = [
@@ -84,7 +87,7 @@ TOOL_DEFINITIONS = [
             "name": "calculate_order_price",
             "description": "Compute the itemised bill (subtotal, "
             "18% GST, total) for one or more order lines (1-3 toppings each). In chat "
-            "the bill is shown to the customer automatically — do not repeat its "
+            "the bill is shown to the customer automatically â€” do not repeat its "
             "numbers. On a voice call, read back only the total.",
             "parameters": {
                 "type": "object",
@@ -178,7 +181,7 @@ def tools_for(session) -> list[dict]:
     """The tool schemas legal for this turn (stage gating).
 
     confirm_and_save_order only exists once a bill has been priced and not yet
-    saved — the model mechanically cannot save an order early, no prompt rule
+    saved â€” the model mechanically cannot save an order early, no prompt rule
     needed. Repricing (calculate_order_price) reopens a confirmed session.
     """
     names = set(_EXPOSED_ALWAYS)
@@ -190,17 +193,22 @@ def tools_for(session) -> list[dict]:
 def menu_names() -> dict[str, list[str]]:
     """A few live item names per category, for prompt few-shot examples.
 
-    Never hardcode names in the prompt — the grader swaps menu files. Empty
+    Never hardcode names in the prompt â€” the grader swaps menu files. Empty
     lists when the menu is unavailable (the caller then skips the examples).
     """
     try:
         m = _load_active_menu()
     except MenuError:
         return {"bases": [], "pizzas": [], "toppings": []}
+    
+    bases = [i.name for i in m.categories["base"].items[:2]] if "base" in m.categories else []
+    pizzas = [i.name for i in m.categories["pizza"].items[:3]] if "pizza" in m.categories else []
+    toppings = [i.name for i in m.categories["topping"].items[:3]] if "topping" in m.categories else []
+    
     return {
-        "bases": [i.name for i in m.bases[:2]],
-        "pizzas": [i.name for i in m.pizzas[:3]],
-        "toppings": [i.name for i in m.toppings[:3]],
+        "bases": bases,
+        "pizzas": pizzas,
+        "toppings": toppings,
     }
 
 
@@ -213,45 +221,25 @@ def _find(items: list[MenuItem], _id) -> MenuItem | None:
     return next((i for i in items if i.id == _id), None)
 
 
-def _resolve_lines(items) -> tuple[list[tuple[Bill, list[MenuItem]]], list[str]]:
-    """Validate + price each order line. Returns (bills_data, error_messages)."""
-    bills_data: list[tuple[Bill, list[MenuItem]]] = []
+def _resolve_lines(items) -> tuple[list[BillItem], list[str]]:
+    """Validate + price each order line using the shared CartHelper logic. Returns (bill_items, error_messages)."""
+    bill_items: list[BillItem] = []
     errors: list[str] = []
     if not items:
-        return bills_data, ["The order has no items."]
+        return bill_items, ["The order has no items."]
     menu = _load_active_menu()  # may raise MenuError
     for idx, line in enumerate(items, 1):
-        base = _find(menu.bases, line.get("base_id"))
-        pizza = _find(menu.pizzas, line.get("pizza_id"))
-        missing = [n for n, val in (("base", base), ("pizza", pizza)) if val is None]
-
-        topping_ids = line.get("topping_ids") or []
-        toppings = []
-        for tid in topping_ids:
-            t = _find(menu.toppings, tid)
-            if t:
-                toppings.append(t)
-            else:
-                missing.append(f"topping:{tid}")
-
-        if missing:
-            errors.append(
-                f"Item {idx}: unknown {', '.join(missing)} — not on the menu."
-            )
-            continue
-        if not topping_ids:
-            errors.append(f"Item {idx}: please pick at least one topping (up to 3).")
-            continue
-        ok_q, qty = v.validate_quantity(line.get("quantity"))
-        if not ok_q:
-            errors.append(f"Item {idx}: {qty}")
-            continue
-
-        combined_t = _combined_topping(toppings)
-        bills_data.append(
-            (pricing.compute_bill(base, pizza, combined_t, qty), toppings)
-        )
-    return bills_data, errors
+        if isinstance(line.get("quantity"), str) and line.get("quantity").isdigit():
+            line["quantity"] = int(line["quantity"])
+        
+        req = CartLineReq(**line)
+        b_item, err = resolve_cart_line(menu, req)
+        if err:
+            err_texts = [f"{k}: {v}" for k, v in err.items()]
+            errors.append(f"Item {idx}: {', '.join(err_texts)}")
+        else:
+            bill_items.append(b_item)
+    return bill_items, errors
 
 
 # --------------------------------------------------------------------------- #
@@ -266,16 +254,15 @@ def _get_menu(args, session) -> str:
         return f"Menu unavailable: {exc}"
 
     def block(title, items):
-        rows = "\n".join(f"  {i.id} — {i.name} — INR {i.price:.2f}" for i in items)
+        if not items: return ""
+        rows = "\n".join(f"  {i.id} â€” {i.name} â€” INR {i.price:.2f}" for i in items)
         return f"{title}:\n{rows}"
 
-    return "\n".join(
-        [
-            block("Bases", menu.bases),
-            block("Pizzas", menu.pizzas),
-            block("Toppings", menu.toppings),
-        ]
-    )
+    blocks = []
+    for cat_code, cat in menu.categories.items():
+        blocks.append(block(cat.name, cat.items))
+    
+    return "\n".join(filter(None, blocks))
 
 
 def _get_customer_profile(args, session) -> str:
@@ -287,11 +274,11 @@ def _get_customer_profile(args, session) -> str:
             "10-digit phone number before saving any order."
         )
     address = session.address or (
-        "NONE SAVED — a delivery address is required before the order can be "
+        "NONE SAVED â€” a delivery address is required before the order can be "
         "placed; ask the customer to add one in the Profile tab, then continue."
     )
     return (
-        f"Saved profile — name: {session.name}, phone: {session.phone}, "
+        f"Saved profile â€” name: {session.name}, phone: {session.phone}, "
         f"delivery address: {address}. Use these; never ask the customer "
         "to type them."
     )
@@ -299,51 +286,25 @@ def _get_customer_profile(args, session) -> str:
 
 def _calculate_order_price(args, session) -> str:
     try:
-        bills_data, errors = _resolve_lines(args.get("items") or [])
+        bill_items, errors = _resolve_lines(args.get("items") or [])
     except MenuError as exc:
         return f"Menu unavailable: {exc}"
     if errors:
         return "Could not price the order:\n- " + "\n- ".join(errors)
 
-    out_lines = []
+    bill = pricing.compute_bill(bill_items)
+    
+    out_lines = [cart_line_to_dict(b) for b in bill_items]
     totals = {
-        "subtotal": 0.0,
-        "discount": 0.0,
-        "taxable": 0.0,
-        "gst": 0.0,
-        "total": 0.0,
+        "subtotal": bill.subtotal,
+        "discount": bill.discount,
+        "taxable": bill.taxable,
+        "gst": bill.gst,
+        "total": bill.total,
     }
 
-    for bill, toppings in bills_data:
-        out_lines.append(
-            {
-                "base": {
-                    "id": bill.base.id,
-                    "name": bill.base.name,
-                    "price": bill.base.price,
-                },
-                "pizza": {
-                    "id": bill.pizza.id,
-                    "name": bill.pizza.name,
-                    "price": bill.pizza.price,
-                },
-                "toppings": [
-                    {"id": t.id, "name": t.name, "price": t.price} for t in toppings
-                ],
-                "quantity": bill.quantity,
-                "unit_price": bill.unit_price,
-                "subtotal": bill.subtotal,
-                "discount": bill.discount,
-                "taxable": bill.taxable,
-                "gst": bill.gst,
-                "total": bill.total,
-            }
-        )
-        for k in totals:
-            totals[k] = round(totals[k] + getattr(bill, k), 2)
-
     if session is not None:
-        session.pricing = {"grand_total": totals["total"], "n_lines": len(bills_data)}
+        session.pricing = {"grand_total": totals["total"], "n_lines": len(bill_items)}
         # A (re)priced bill reopens the flow: the next legal save is for THIS
         # bill. Lets a customer order again after a completed order.
         session.confirmed = False
@@ -383,10 +344,10 @@ def _validate_customer(args, session) -> str:
 
 
 def _confirm_and_save_order(args, session) -> str:
-    """Save the order to Supabase ONLY — one row per order, line breakdown in
+    """Save the order to Supabase ONLY â€” one row per order, line breakdown in
     `items` jsonb, DB-generated order_no (SM-YYYYMMDD-NNNN), stamped with the
     profile's user_id. Same DECIDED path as /api/cart/checkout: no .txt write
-    (the graded Gradio app owns orders_log.txt) and a DB failure is surfaced,
+    (orders_log.txt is not used by Stage 3 orders) and a DB failure is surfaced,
     never swallowed."""
     # Output guardrail: deterministic customer-field validation. Name/phone fall
     # back to the saved profile (primed on the session by get_customer_profile).
@@ -396,7 +357,7 @@ def _confirm_and_save_order(args, session) -> str:
         args.get("payment_mode", ""),
     )
     try:
-        bills_data, line_errors = _resolve_lines(args.get("items") or [])
+        bill_items, line_errors = _resolve_lines(args.get("items") or [])
     except MenuError as exc:
         return f"Menu unavailable: {exc}"
     errors.extend(line_errors)
@@ -417,21 +378,16 @@ def _confirm_and_save_order(args, session) -> str:
 
     # Same items/totals shape as /api/cart/checkout so the Orders tab renders
     # chat and checkout orders identically.
-    items = []
-    totals = {"subtotal": 0.0, "discount": 0.0, "gst": 0.0, "total": 0.0}
-    for bill, toppings in bills_data:
-        items.append(
-            {
-                "pizza": bill.pizza.name,
-                "base": bill.base.name,
-                "toppings": [t.name for t in toppings],
-                "quantity": bill.quantity,
-                "unit_price": bill.unit_price,
-                "line_total": bill.total,
-            }
-        )
-        for k in totals:
-            totals[k] = round(totals[k] + getattr(bill, k), 2)
+    items = [cart_line_to_dict(b) for b in bill_items]
+    
+    bill = pricing.compute_bill(bill_items)
+    totals = {
+        "subtotal": bill.subtotal,
+        "discount": bill.discount,
+        "taxable": bill.taxable,
+        "gst": bill.gst,
+        "total": bill.total,
+    }
 
     if db_orders is None:
         return (
@@ -454,7 +410,7 @@ def _confirm_and_save_order(args, session) -> str:
             language=(session.language if session else None),
             delivery_address=(session.address if session else None),
         )
-    except Exception as exc:  # DB is the source of truth — surface, don't swallow
+    except Exception as exc:  # DB is the source of truth â€” surface, don't swallow
         log.warning("Order save failed: %s", exc)
         return (
             f"Could not save the order (database error: {exc}). The order is NOT "
@@ -516,7 +472,7 @@ def _escalate_to_human(args, session) -> str:
         )
     log.info("Escalation requested: %s", reason)
     return (
-        "I've flagged this for a team member — someone will reach out shortly. "
+        "I've flagged this for a team member â€” someone will reach out shortly. "
         "Is there anything else I can help with in the meantime?"
     )
 
@@ -534,8 +490,8 @@ _DISPATCH = {
 def execute_tool(name: str, args: dict | None, session=None) -> str:
     """Run a tool by name, returning a string for the LLM. Never raises.
 
-    Wrapped in a Langfuse "tool" observation (when enabled) so each call —
-    pricing, saving an order, escalating — is independently visible/timeable
+    Wrapped in a Langfuse "tool" observation (when enabled) so each call â€”
+    pricing, saving an order, escalating â€” is independently visible/timeable
     in the trace tree, not just reconstructable after the fact from the next
     LLM call's message history."""
     fn = _DISPATCH.get(name)

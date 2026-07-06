@@ -82,6 +82,7 @@ export async function checkoutStaffOrder(payload: {
   phone: string;
   payment_mode: string;
   lines: StaffCartLinePayload[];
+  coupon_code?: string;
 }): Promise<{
   ok: boolean;
   order?: StaffOrder;

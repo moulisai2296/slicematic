@@ -55,7 +55,7 @@ function KioskLogin() {
     setBusy(true);
     setError(null);
     try {
-      const res = await login("kitchen_staff", empId.trim().toUpperCase(), pin);
+      const res = await login("kitchen_staff", empId.trim(), pin);
       if (res.ok && res.token && res.user) {
         setAuth(res.token, res.user);
       } else {

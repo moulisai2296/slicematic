@@ -12,6 +12,7 @@ import {
   Settings,
   ShieldCheck,
   Users,
+  RefreshCcw,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -27,6 +28,7 @@ const navItems = [
   { label: "Payments", href: "/admin/payments", icon: CreditCard },
   { label: "Analytics", href: "/admin/analytics", icon: BarChart3 },
   { label: "AI Insights", href: "/admin/ai-insights", icon: Brain },
+  { label: "Refunds", href: "/admin/refunds", icon: RefreshCcw },
   { label: "Notifications", href: "/admin/notifications", icon: Bell },
   { label: "Audit Logs", href: "/admin/audit-logs", icon: FileClock },
   { label: "Settings", href: "/admin/settings", icon: Settings },

@@ -5,24 +5,32 @@ import {
   Bike,
   Check,
   CreditCard,
+  Gift,
   Loader2,
   MapPin,
   Phone,
   ShoppingBag,
   Smartphone,
   Store,
+  Tag,
   User,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { checkoutCart } from "@/lib/api";
+import {
+  type CouponRule,
+  checkoutCart,
+  listAvailableCoupons,
+  validateCoupon,
+} from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
 import { toPayload, useMenuStore } from "@/lib/menu-store";
-import { cn, formatINR } from "@/lib/utils";
+import { cn, formatINR, roundFinalAmount } from "@/lib/utils";
 
 const METHODS = [
   {
@@ -55,6 +63,95 @@ const METHODS = [
   },
 ] as const;
 
+// ── Coupon picker popup ────────────────────────────────────────────────────
+
+function CouponPicker({
+  coupons,
+  onSelect,
+  onClose,
+}: {
+  coupons: CouponRule[];
+  onSelect: (code: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center">
+      <div className="w-full max-w-md rounded-t-2xl border border-border bg-card sm:rounded-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Gift className="size-5 text-primary" />
+            <span className="font-heading text-base font-semibold">
+              Available Coupons
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="grid size-8 cursor-pointer place-items-center rounded-full text-muted-foreground transition-colors hover:bg-surface-2"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        {/* Coupon list */}
+        <div className="slick-scroll max-h-[60vh] overflow-y-auto p-3 space-y-2">
+          {coupons.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              No coupons available right now.
+            </p>
+          ) : (
+            coupons.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => {
+                  onSelect(c.coupon_code);
+                  onClose();
+                }}
+                className="group flex w-full cursor-pointer items-start gap-3 rounded-xl border border-dashed border-primary/40 bg-primary/5 p-3.5 text-left transition-colors hover:border-primary hover:bg-primary/10"
+              >
+                {/* Left: tag icon + code */}
+                <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/15 text-primary">
+                  <Tag className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-mono text-sm font-bold tracking-wider text-primary">
+                    {c.coupon_code}
+                  </span>
+                  <span className="block text-sm font-medium">
+                    {c.name} — {c.discount_percent}% off
+                  </span>
+                  {c.description && (
+                    <span className="block text-xs text-muted-foreground">
+                      {c.description}
+                    </span>
+                  )}
+                  {c.threshold_amount > 0 && (
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      Min. order {formatINR(c.threshold_amount)}
+                    </span>
+                  )}
+                  {c.end_date && (
+                    <span className="mt-0.5 block text-xs text-amber-600 dark:text-amber-400">
+                      Valid until {new Date(c.end_date).toLocaleDateString("en-IN")}
+                    </span>
+                  )}
+                </span>
+                <span className="shrink-0 text-xs font-medium text-primary opacity-0 transition-opacity group-hover:opacity-100">
+                  Apply →
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main checkout page ─────────────────────────────────────────────────────
+
 export default function CheckoutPage() {
   const router = useRouter();
   const { cart, totals, reprice, clearCart } = useMenuStore();
@@ -74,21 +171,91 @@ export default function CheckoutPage() {
   const [cardExpiry, setCardExpiry] = useState("");
   const [cardCvv, setCardCvv] = useState("");
 
+  // Coupon state
+  const [couponInput, setCouponInput] = useState("");
+  const [couponApplied, setCouponApplied] = useState<{
+    code: string;
+    name: string;
+    discountPercent: number;
+    discountAmount: number;
+    savings: number;
+    newTotal: number;
+  } | null>(null);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
+  const [availableCoupons, setAvailableCoupons] = useState<CouponRule[]>([]);
+  const [couponsLoaded, setCouponsLoaded] = useState(false);
+
   useEffect(() => {
     void reprice();
   }, [reprice]);
 
+  const loadCoupons = useCallback(async () => {
+    if (couponsLoaded) return;
+    try {
+      const res = await listAvailableCoupons();
+      setAvailableCoupons(res.coupons ?? []);
+    } catch {
+      setAvailableCoupons([]);
+    } finally {
+      setCouponsLoaded(true);
+    }
+  }, [couponsLoaded]);
+
+  const handleApplyCoupon = useCallback(
+    async (code: string) => {
+      const raw = code.trim().toUpperCase();
+      if (!raw) return;
+      if (!totals) {
+        setCouponError("Cart total not loaded yet. Please wait.");
+        return;
+      }
+      setCouponLoading(true);
+      setCouponError(null);
+      try {
+        const res = await validateCoupon(raw, totals.total);
+        if (!res.ok) {
+          setCouponError(Object.values(res.errors ?? {})[0] ?? "Invalid coupon.");
+          setCouponApplied(null);
+        } else {
+          setCouponApplied({
+            code: res.coupon_code!,
+            name: res.coupon_name!,
+            discountPercent: res.discount_percent!,
+            discountAmount: res.discount_amount!,
+            savings: res.savings!,
+            newTotal: res.new_total!,
+          });
+          setCouponError(null);
+          setCouponInput(res.coupon_code!);
+        }
+      } catch {
+        setCouponError("Couldn't validate coupon. Please try again.");
+      } finally {
+        setCouponLoading(false);
+      }
+    },
+    [totals]
+  );
+
+  const removeCoupon = () => {
+    setCouponApplied(null);
+    setCouponInput("");
+    setCouponError(null);
+  };
+
+  const finalTotal = couponApplied ? couponApplied.newTotal : totals?.total;
+  const finalSavings = couponApplied ? couponApplied.savings : 0;
+
   const nameOk = /^[A-Za-z ]{2,40}$/.test(name.trim());
   const phoneOk = /^[6-9]\d{9}$/.test(phone.trim());
-  // Show inputs when the user opts to edit, or when a prefilled value is invalid.
   const showContactEditor = editingContact || !nameOk || !phoneOk;
   const method = METHODS.find((m) => m.id === methodId)!;
   const address = useMemo(
     () => addresses.find((a) => a.id === addressId),
     [addresses, addressId]
   );
-  // "Cash at Store" is pickup — no address needed. Every other method
-  // (COD/UPI/Card) is delivery and requires a saved address.
   const needsAddress = method.id !== "cash";
   const cardOk =
     method.id !== "card" ||
@@ -120,7 +287,9 @@ export default function CheckoutPage() {
         phone: phone.trim(),
         payment_mode: method.mode,
         address: needsAddress && address ? `${address.label}: ${address.line}` : "",
+        type: needsAddress ? "online" : "takeaway",
         lines: cart.map(toPayload),
+        ...(couponApplied ? { coupon_code: couponApplied.code } : {}),
       });
       if (!res.ok || !res.order_no) {
         const first = res.errors ? Object.values(res.errors)[0] : null;
@@ -129,7 +298,6 @@ export default function CheckoutPage() {
         return;
       }
       clearCart();
-      // Order is now in the DB (source of truth); the Orders tab loads it.
       router.push(`/orders?placed=${encodeURIComponent(res.order_no)}`);
     } catch {
       setError("Can't reach SliceMatic right now. Please try again.");
@@ -153,7 +321,7 @@ export default function CheckoutPage() {
 
   return (
     <div className="relative flex h-full flex-col">
-      {/* Dedicated screen header */}
+      {/* Screen header */}
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-2">
         <button
           type="button"
@@ -168,7 +336,7 @@ export default function CheckoutPage() {
 
       <div className="slick-scroll flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-2xl space-y-6 px-4 py-5">
-          {/* Delivery contact — compact display, edit inline (saves scroll) */}
+          {/* Delivery contact */}
           <section className="space-y-2">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold">Delivery contact</h2>
@@ -271,32 +439,32 @@ export default function CheckoutPage() {
                 </Button>
               </div>
             ) : (
-            <div className="space-y-2">
-              {addresses.map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  onClick={() => setAddressId(a.id)}
-                  className={cn(
-                    "flex w-full cursor-pointer items-start gap-3 rounded-xl border p-3.5 text-left transition-colors",
-                    addressId === a.id
-                      ? "border-primary bg-primary/10"
-                      : "border-border bg-surface-2 hover:border-primary/50"
-                  )}
-                >
-                  <MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium">{a.label}</span>
-                    <span className="block text-sm text-muted-foreground">
-                      {a.line}
+              <div className="space-y-2">
+                {addresses.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => setAddressId(a.id)}
+                    className={cn(
+                      "flex w-full cursor-pointer items-start gap-3 rounded-xl border p-3.5 text-left transition-colors",
+                      addressId === a.id
+                        ? "border-primary bg-primary/10"
+                        : "border-border bg-surface-2 hover:border-primary/50"
+                    )}
+                  >
+                    <MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium">{a.label}</span>
+                      <span className="block text-sm text-muted-foreground">
+                        {a.line}
+                      </span>
                     </span>
-                  </span>
-                  {addressId === a.id && (
-                    <Check className="size-4 shrink-0 text-primary" />
-                  )}
-                </button>
-              ))}
-            </div>
+                    {addressId === a.id && (
+                      <Check className="size-4 shrink-0 text-primary" />
+                    )}
+                  </button>
+                ))}
+              </div>
             )}
           </section>
 
@@ -417,16 +585,104 @@ export default function CheckoutPage() {
             )}
           </section>
 
-          {/* Summary */}
+          {/* ── Coupon section ── */}
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold">Coupon / Promo</h2>
+              <button
+                id="checkout-view-coupons"
+                type="button"
+                onClick={() => {
+                  void loadCoupons();
+                  setShowPicker(true);
+                }}
+                className="flex cursor-pointer items-center gap-1 text-xs font-medium text-primary hover:underline"
+              >
+                <Gift className="size-3.5" />
+                View available coupons
+              </button>
+            </div>
+
+            {couponApplied ? (
+              /* Applied coupon strip */
+              <div className="flex items-center gap-3 rounded-xl border border-green-500/40 bg-green-500/10 px-3.5 py-3">
+                <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-green-500/20 text-green-600 dark:text-green-400">
+                  <Tag className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-mono text-sm font-bold tracking-wider text-green-600 dark:text-green-400">
+                    {couponApplied.code}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    {couponApplied.name} — {couponApplied.discountPercent}% off · saving{" "}
+                    <span className="font-medium text-green-600 dark:text-green-400">
+                      {formatINR(couponApplied.savings)}
+                    </span>
+                  </span>
+                </span>
+                <button
+                  id="checkout-remove-coupon"
+                  type="button"
+                  onClick={removeCoupon}
+                  aria-label="Remove coupon"
+                  className="grid size-7 cursor-pointer place-items-center rounded-full text-muted-foreground transition-colors hover:bg-surface-2"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+            ) : (
+              /* Coupon input */
+              <div className="flex gap-2">
+                <Input
+                  id="checkout-coupon-input"
+                  className="bg-card font-mono tracking-wider uppercase"
+                  placeholder="Enter coupon code"
+                  value={couponInput}
+                  onChange={(e) => {
+                    setCouponInput(e.target.value.toUpperCase());
+                    setCouponError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void handleApplyCoupon(couponInput);
+                  }}
+                />
+                <Button
+                  id="checkout-apply-coupon"
+                  type="button"
+                  variant="secondary"
+                  disabled={!couponInput.trim() || couponLoading}
+                  onClick={() => void handleApplyCoupon(couponInput)}
+                  className="shrink-0"
+                >
+                  {couponLoading ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    "Apply"
+                  )}
+                </Button>
+              </div>
+            )}
+
+            {couponError && (
+              <p className="text-xs text-destructive">{couponError}</p>
+            )}
+          </section>
+
+          {/* Order summary */}
           <section className="space-y-3">
             <h2 className="text-sm font-semibold">Order summary</h2>
             <ul className="space-y-2 rounded-xl border border-border bg-surface-2 p-3.5">
               {cart.map((l) => (
                 <li key={l.id} className="flex justify-between gap-3 text-sm">
                   <span className="min-w-0">
-                    <span className="font-medium">{l.quantity}× {l.pizza.name}</span>
+                    <span className="font-medium">
+                      {l.quantity}× {l.item.name} {l.size_code && `(${l.size_code})`}
+                    </span>
                     <span className="block truncate text-xs text-muted-foreground">
-                      {l.base.name} · {l.toppings.map((t) => t.name).join(", ")}
+                      {l.crust?.name ? `${l.crust.name}` : ""}
+                      {l.crust && l.toppings.length > 0 ? " · " : ""}
+                      {l.toppings.length > 0 ? l.toppings.map((t) => t.name).join(", ") : ""}
+                      {!l.crust && l.toppings.length === 0 && l.item.category_code !== 'pizza' ? l.item.item_type || '' : ""}
                     </span>
                   </span>
                 </li>
@@ -435,6 +691,20 @@ export default function CheckoutPage() {
                 <span>GST (18%) included</span>
                 <span className="tabular-nums">{totals ? formatINR(totals.gst) : "…"}</span>
               </li>
+              {couponApplied && (
+                <>
+                  <li className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Original total</span>
+                    <span className="tabular-nums line-through text-muted-foreground">
+                      {totals ? formatINR(totals.total) : "…"}
+                    </span>
+                  </li>
+                  <li className="flex justify-between text-sm text-green-600 dark:text-green-400">
+                    <span>Coupon savings ({couponApplied.code})</span>
+                    <span className="tabular-nums">−{formatINR(couponApplied.savings)}</span>
+                  </li>
+                </>
+              )}
             </ul>
           </section>
 
@@ -454,11 +724,19 @@ export default function CheckoutPage() {
         <div className="mx-auto flex w-full max-w-2xl items-center gap-3">
           <div className="min-w-0">
             <span className="block text-xs text-muted-foreground">Total payable</span>
-            <span className="font-heading text-xl font-bold tabular-nums">
-              {totals ? formatINR(totals.total) : "…"}
-            </span>
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-heading text-xl font-bold tabular-nums">
+                {finalTotal != null ? formatINR(roundFinalAmount(finalTotal)) : "…"}
+              </span>
+              {finalSavings > 0 && (
+                <span className="text-xs font-medium text-green-600 dark:text-green-400">
+                  ({formatINR(finalSavings)} saved)
+                </span>
+              )}
+            </div>
           </div>
           <Button
+            id="checkout-place-order"
             className="flex-1"
             size="lg"
             disabled={!canPlace}
@@ -467,13 +745,13 @@ export default function CheckoutPage() {
             {processing
               ? "Placing…"
               : method.id === "upi" || method.id === "card"
-                ? `Pay ${totals ? formatINR(totals.total) : ""}`
+                ? `Pay ${finalTotal != null ? formatINR(roundFinalAmount(finalTotal)) : ""}`
                 : "Place order"}
           </Button>
         </div>
       </div>
 
-      {/* Simulated UPI/Card payment overlay */}
+      {/* Simulated payment overlay */}
       {processing && (method.id === "upi" || method.id === "card") && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-background/90 backdrop-blur-sm">
           <Loader2 className="size-10 animate-spin text-primary" />
@@ -482,10 +760,22 @@ export default function CheckoutPage() {
               {method.id === "upi" ? "Processing UPI payment" : "Processing card payment"}
             </p>
             <p className="text-sm text-muted-foreground">
-              {totals ? formatINR(totals.total) : ""} · do not close this screen
+              {finalTotal != null ? formatINR(finalTotal) : ""} · do not close this screen
             </p>
           </div>
         </div>
+      )}
+
+      {/* Coupon picker popup */}
+      {showPicker && (
+        <CouponPicker
+          coupons={availableCoupons}
+          onSelect={(code) => {
+            setCouponInput(code);
+            void handleApplyCoupon(code);
+          }}
+          onClose={() => setShowPicker(false)}
+        />
       )}
     </div>
   );

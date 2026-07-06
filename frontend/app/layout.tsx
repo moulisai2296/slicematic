@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Karla, Playfair_Display } from "next/font/google";
 
 import { ThemeProvider } from "@/components/theme-provider";
+import { ThemeSwitcher } from "@/components/theme-switcher";
 import { DEFAULT_THEME } from "@/lib/themes";
 import "./globals.css";
 
@@ -42,7 +43,10 @@ export default function RootLayout({
       className={`${playfair.variable} ${karla.variable} h-full`}
     >
       <body className="min-h-full" suppressHydrationWarning>
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          {children}
+          <ThemeSwitcher />
+        </ThemeProvider>
       </body>
     </html>
   );

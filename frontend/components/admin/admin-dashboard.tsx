@@ -18,6 +18,7 @@ import {
   type AdminDashboardResponse,
   type AdminTodayMetrics,
 } from "@/lib/admin-api";
+import { useRealtime } from "@/lib/useRealtime";
 import { formatINR } from "@/lib/utils";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,22 +32,28 @@ type LoadState =
 export function AdminDashboard() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
 
-  async function load() {
-    setState({ status: "loading" });
+  async function load(silent = false) {
+    if (!silent) {
+      setState({ status: "loading" });
+    }
     try {
       const data = await getAdminDashboard();
       setState({ status: "ready", data });
     } catch (error) {
-      setState({
-        status: "error",
-        message: error instanceof Error ? error.message : "Admin API failed.",
-      });
+      if (!silent) {
+        setState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Admin API failed.",
+        });
+      }
     }
   }
 
   useEffect(() => {
     void load();
   }, []);
+
+  useRealtime(["order_created", "order_status_updated"], () => void load(true), () => void load(true));
 
   if (state.status === "loading") {
     return (

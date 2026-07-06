@@ -49,7 +49,8 @@ function AdminLogin() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSubmit = !busy && email.includes("@") && password.length >= 8;
+  const isEmpCode = email.trim().toLowerCase().startsWith("emp") || email.trim().toLowerCase().startsWith("smemp");
+  const canSubmit = !busy && (isEmpCode ? email.trim().length >= 3 && password.length >= 6 : email.includes("@") && password.length >= 8);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,7 +82,7 @@ function AdminLogin() {
           <div>
             <h1 className="font-heading text-2xl font-bold">Admin</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Sign in with your admin email and password.
+              Sign in with your employee ID / email and PIN / password.
             </p>
           </div>
         </div>
@@ -92,15 +93,15 @@ function AdminLogin() {
               htmlFor="admin-email"
               className="mb-1.5 block text-xs font-medium text-muted-foreground"
             >
-              Email
+              Employee ID / Email
             </label>
             <Input
               id="admin-email"
-              type="email"
-              autoComplete="email"
+              type="text"
+              autoComplete="username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@slicematic.in"
+              placeholder="emp001 or admin@slicematic.in"
             />
           </div>
           <div>
@@ -108,7 +109,7 @@ function AdminLogin() {
               htmlFor="admin-password"
               className="mb-1.5 block text-xs font-medium text-muted-foreground"
             >
-              Password
+              PIN / Password
             </label>
             <Input
               id="admin-password"
@@ -116,7 +117,7 @@ function AdminLogin() {
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
+              placeholder="••••••"
             />
           </div>
 

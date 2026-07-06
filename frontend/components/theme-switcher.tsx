@@ -1,14 +1,12 @@
 "use client";
 
-import { Check, Palette } from "lucide-react";
+import { Check, Moon, Sun } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { useTheme } from "@/components/theme-provider";
-import { Button } from "@/components/ui/button";
 import { THEMES } from "@/lib/themes";
 import { cn } from "@/lib/utils";
 
-/** Compact palette picker — proves the "configurable colors" requirement live. */
 export function ThemeSwitcher() {
   const { theme, setTheme } = useTheme();
   const [open, setOpen] = useState(false);
@@ -23,23 +21,15 @@ export function ThemeSwitcher() {
     return () => document.removeEventListener("mousedown", onClick);
   }, [open]);
 
+  // Make sure hydration mismatch doesn't happen with the icon by rendering nothing or a default
+  // Wait, theme is loaded on client. Actually useTheme initializes it with DEFAULT_THEME synchronously.
+  
   return (
-    <div className="relative" ref={ref}>
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Change color theme"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <Palette />
-      </Button>
-
+    <div className="fixed bottom-4 right-4 z-50" ref={ref}>
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-11 z-50 w-56 animate-bubble-in rounded-xl border border-border bg-card p-1.5 shadow-lg"
+          className="absolute bottom-14 right-0 w-56 animate-bubble-in rounded-xl border border-border bg-card p-1.5 shadow-xl"
         >
           {THEMES.map((t) => (
             <button
@@ -55,22 +45,9 @@ export function ThemeSwitcher() {
                 theme === t.id && "bg-surface-2"
               )}
             >
-              <span className="flex shrink-0 -space-x-1">
-                <span
-                  className="size-4 rounded-full border border-black/10"
-                  style={{ background: t.swatch.primary }}
-                />
-                <span
-                  className="size-4 rounded-full border border-black/10"
-                  style={{ background: t.swatch.accent }}
-                />
-              </span>
               <span className="flex-1">
                 <span className="block text-sm font-medium text-foreground">
                   {t.label}
-                </span>
-                <span className="block text-xs text-muted-foreground">
-                  {t.description}
                 </span>
               </span>
               {theme === t.id && (
@@ -80,6 +57,16 @@ export function ThemeSwitcher() {
           ))}
         </div>
       )}
+
+      <button
+        type="button"
+        aria-label="Toggle theme"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="grid size-12 cursor-pointer place-items-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 active:scale-95"
+      >
+        {theme === "dark" ? <Moon className="size-5" /> : <Sun className="size-5" />}
+      </button>
     </div>
   );
 }

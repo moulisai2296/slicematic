@@ -3,7 +3,7 @@
 import { ShoppingBag } from "lucide-react";
 
 import { useMenuStore } from "@/lib/menu-store";
-import { formatINR } from "@/lib/utils";
+import { formatINR, roundFinalAmount } from "@/lib/utils";
 
 /** Floating "view order" bar — sits above the tab bar when the cart is filled. */
 export function CartBar() {
@@ -31,7 +31,7 @@ export function CartBar() {
           </span>
         </span>
         <span className="font-heading text-lg font-bold tabular-nums">
-          {totals ? formatINR(totals.total) : "…"}
+          {totals ? formatINR(roundFinalAmount(totals.total)) : "…"}
         </span>
       </button>
     </div>

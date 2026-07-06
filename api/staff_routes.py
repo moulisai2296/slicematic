@@ -30,7 +30,9 @@ class StaffCheckout(BaseModel):
     name: str
     phone: str
     payment_mode: str
+    type: str = "dine_in"
     lines: list[public_routes.CartLineReq]
+    coupon_code: str = ""
 
 
 def _staff_email() -> str:
@@ -110,6 +112,12 @@ def advance_order(
             performed_by=user["id"],
             reason=req.reason,
         )
+        try:
+            from ai.realtime import broadcast_event
+            broadcast_event("order_status_updated", order)
+        except Exception as ws_exc:
+            import logging
+            logging.getLogger(__name__).warning("Failed to broadcast order_status_updated: %s", ws_exc)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -158,8 +166,53 @@ def checkout(
         for key in totals:
             totals[key] = round(totals[key] + getattr(bill, key), 2)
 
+    if req.type not in {"dine_in", "takeaway"}:
+        errors["type"] = "Type must be either 'dine_in' or 'takeaway'."
+
     if errors:
         return {"ok": False, "errors": errors}
+
+    if req.coupon_code:
+        coupon_err = None
+        code = req.coupon_code.strip().upper()
+        from db import postgres as local_postgres
+        if local_postgres.is_enabled():
+            try:
+                with local_postgres.connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            select discount_percent, threshold_amount, start_date, end_date, is_active
+                            from public.discount_rules where upper(coupon_code) = %s limit 1
+                        """, (code,))
+                        row = cur.fetchone()
+                if not row:
+                    coupon_err = f"Coupon '{code}' not found."
+                else:
+                    d_pct, t_amt, s_date, e_date, is_act = row
+                    from datetime import date as _d2
+                    today = _d2.today()
+                    if not is_act:
+                        coupon_err = "This coupon is no longer active."
+                    elif s_date and today < s_date:
+                        coupon_err = f"Coupon valid from {s_date}."
+                    elif e_date and today > e_date:
+                        coupon_err = "This coupon has expired."
+                    elif t_amt and t_amt > 0 and totals["total"] < t_amt:
+                        coupon_err = f"Minimum order \u20b9{float(t_amt):.0f} required."
+                    else:
+                        gst_rate = 0.18
+                        subtotal = totals["subtotal"]
+                        discount_amount = round(subtotal * float(d_pct) / 100.0, 2)
+                        new_subtotal = round(subtotal - discount_amount, 2)
+                        new_gst = round(new_subtotal * gst_rate, 2)
+                        new_total = round(new_subtotal + new_gst, 2)
+                        totals["discount"] = discount_amount
+                        totals["gst"] = new_gst
+                        totals["total"] = new_total
+            except Exception as exc:
+                coupon_err = f"Coupon check failed: {exc}"
+        if coupon_err:
+            return {"ok": False, "errors": {"coupon_code": coupon_err}}
 
     try:
         order = admin_db.create_staff_order(
@@ -172,7 +225,14 @@ def checkout(
             total=totals["total"],
             payment_mode=mode,
             performed_by=user["id"],
+            type=req.type,
         )
+        try:
+            from ai.realtime import broadcast_event
+            broadcast_event("order_created", order)
+        except Exception as ws_exc:
+            import logging
+            logging.getLogger(__name__).warning("Failed to broadcast order_created: %s", ws_exc)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "order": order}

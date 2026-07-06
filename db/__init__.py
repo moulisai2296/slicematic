@@ -1,6 +1,5 @@
-"""Additive Supabase layer. NOT a dependency of the graded path.
+﻿"""Database adapters for the Stage 3 application.
 
-core/ never imports this. Every call here is best-effort: if Supabase is
-unconfigured or unreachable, functions log a warning and return None — the
-orders_log.txt write (core/persistence.py) remains the primary, mandatory output.
+Modules load lazily so tests and public menu/pricing imports can run without
+requiring live database credentials.
 """

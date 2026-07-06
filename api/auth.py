@@ -141,8 +141,14 @@ def login(req: LoginReq):
     if field is None:
         return _errors(role="Unknown role.")
     identifier = (req.identifier or "").strip()
-    if req.role == "admin":
+    
+    # Support logging in by employee code for all roles:
+    if identifier.lower().startswith("emp") or identifier.lower().startswith("smemp"):
+        field = "emp_id"
         identifier = identifier.lower()
+    elif req.role == "admin":
+        identifier = identifier.lower()
+
     if not identifier or not (req.secret or "").strip():
         return _errors(credentials="Enter your details to sign in.")
 

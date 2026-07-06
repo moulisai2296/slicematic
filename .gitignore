@@ -20,7 +20,8 @@ node_modules/
 frontend/.next/
 
 # Installed dev-time skills (regenerable via `uipro init --ai claude`) — not project code
-.claude/skills/
+.claude/
+.ruff_cache/
 
 # OS/editor junk
 .DS_Store

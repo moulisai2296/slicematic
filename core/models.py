@@ -2,40 +2,62 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional, List, Dict
 
+@dataclass(frozen=True)
+class MenuSize:
+    id: str
+    code: str
+    name: str
+
+@dataclass(frozen=True)
+class MenuItemSize:
+    size_id: str
+    size_code: str
+    price: float
 
 @dataclass(frozen=True)
 class MenuItem:
-    """One line of a menu file: ID;Name;Price."""
-
+    """One item in the menu."""
     id: str
+    category_id: str
+    category_code: str
     name: str
     price: float
+    item_type: Optional[str] = None
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+    sizes: List[MenuItemSize] = field(default_factory=list)
 
-    def label(self, index: int) -> str:
-        """Numbered display label, e.g. '3. Cheese Burst — INR 229.00'."""
-        return f"{index}. {self.name} — INR {self.price:.2f}"
-
+@dataclass(frozen=True)
+class MenuCategory:
+    id: str
+    code: str
+    name: str
+    items: List[MenuItem] = field(default_factory=list)
 
 @dataclass(frozen=True)
 class Menu:
-    """The three loaded categories. Each list is guaranteed non-empty."""
+    """The loaded menu, categorized."""
+    categories: Dict[str, MenuCategory] = field(default_factory=dict)
+    all_sizes: List[MenuSize] = field(default_factory=list)
 
-    bases: list[MenuItem]
-    pizzas: list[MenuItem]
-    toppings: list[MenuItem]
-
+@dataclass(frozen=True)
+class BillItem:
+    """One finalized line in the cart."""
+    item: MenuItem
+    size_code: Optional[str]
+    crust: Optional[MenuItem]
+    toppings: List[MenuItem]
+    quantity: int
+    unit_price: float
+    subtotal: float
 
 @dataclass(frozen=True)
 class Bill:
     """Result of the pricing engine. All money values rounded to 2 dp."""
-
-    base: MenuItem
-    pizza: MenuItem
-    topping: MenuItem
-    quantity: int
-    unit_price: float
+    items: List[BillItem]
     subtotal: float
     discount: float
     taxable: float

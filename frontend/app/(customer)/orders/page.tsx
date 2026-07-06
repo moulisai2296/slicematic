@@ -8,21 +8,38 @@ import {
   PackageCheck,
   PartyPopper,
   Receipt,
+  Star,
+  MessageSquare,
+  RefreshCcw,
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+
+import { BillModal } from "@/components/shared/bill-modal";
+import { RefundModal } from "@/components/customer/refund-modal";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import type { UserOrder } from "@/lib/api";
+import { 
+  type UserOrder, 
+  getOrderFeedback, 
+  submitOrderFeedback 
+} from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
 import { orderStatus, useOrdersStore } from "@/lib/orders-store";
+import { useRealtime } from "@/lib/useRealtime";
 import { cn, formatINR } from "@/lib/utils";
 
 // Received, Preparing, Ready for pickup, Out for delivery, Delivered.
-const STEP_ICONS = [Check, ChefHat, PackageCheck, Bike, PartyPopper];
+const STEP_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
+  "Received": Check,
+  "Preparing": ChefHat,
+  "Ready for pickup": PackageCheck,
+  "Out for delivery": Bike,
+  "Delivered": PartyPopper,
+};
 
 export default function OrdersPage() {
   return (
@@ -45,12 +62,8 @@ function OrdersContent() {
 
   useEffect(() => refresh(), [refresh]);
 
-  // Poll so real status changes (kitchen/delivery marking an order along)
-  // show up while the tab is open, without a manual refresh.
-  useEffect(() => {
-    const t = setInterval(refresh, 15000);
-    return () => clearInterval(t);
-  }, [refresh]);
+  // Listen to live status updates and fallback to polling automatically
+  useRealtime(["order_status_updated"], refresh, refresh);
 
   if (loading && orders.length === 0) {
     return (
@@ -119,6 +132,9 @@ function OrderCard({
   order: UserOrder;
   highlight?: boolean;
 }) {
+  const [showBill, setShowBill] = useState(false);
+  const [showRefund, setShowRefund] = useState(false);
+  
   const placedMs = Date.parse(order.created_at);
   const { index, step, steps } = orderStatus(order);
   const placedTime = Number.isNaN(placedMs)
@@ -151,7 +167,7 @@ function OrderCard({
       {/* Status stepper */}
       <div className="flex items-center px-4 py-4">
         {steps.map((label, i) => {
-          const Icon = STEP_ICONS[i];
+          const Icon = STEP_ICON_MAP[label] ?? Check;
           const done = i <= index;
           return (
             <div key={label} className="flex flex-1 items-center last:flex-none">
@@ -193,8 +209,13 @@ function OrderCard({
         {items.map((item, i) => (
           <div key={i} className="flex justify-between gap-3 text-sm">
             <span className="min-w-0 truncate text-muted-foreground">
-              {item.quantity}× {item.pizza}
-              <span className="text-xs"> · {item.base}</span>
+              {item.quantity}× {item.item_name} {item.size_code && `(${item.size_code})`}
+              <span className="text-xs">
+                {item.crust ? ` · ${item.crust}` : ""}
+                {item.crust && item.toppings.length > 0 ? " · " : ""}
+                {item.toppings.length > 0 ? item.toppings.join(", ") : ""}
+                {!item.crust && item.toppings.length === 0 && item.item_type ? ` · ${item.item_type}` : ""}
+              </span>
             </span>
             <span className="shrink-0 tabular-nums text-muted-foreground">
               {formatINR(item.line_total)}
@@ -206,6 +227,153 @@ function OrderCard({
           <span className="tabular-nums">{formatINR(order.total)}</span>
         </div>
       </div>
+
+      {/* Bill & Refund Actions */}
+      <div className="flex gap-2 border-t border-border p-4">
+        <Button variant="outline" size="sm" className="w-full gap-2" onClick={() => setShowBill(true)}>
+          <Receipt className="size-4" /> View Bill
+        </Button>
+        <Button variant="outline" size="sm" className="w-full gap-2" onClick={() => setShowRefund(true)}>
+          <RefreshCcw className="size-4" /> Ask Refund
+        </Button>
+      </div>
+
+      <BillModal open={showBill} onOpenChange={setShowBill} order={order} />
+      <RefundModal open={showRefund} onOpenChange={setShowRefund} order={order} />
+
+      {/* Feedback section (only for delivered orders) */}
+      {index === steps.length - 1 && (
+        <OrderFeedback orderNo={order.order_no} />
+      )}
     </Card>
+  );
+}
+
+function OrderFeedback({ orderNo }: { orderNo: string }) {
+  const [status, setStatus] = useState<"loading" | "prompt" | "form" | "submitting" | "submitted" | "error">("loading");
+  const [rating, setRating] = useState(0);
+  const [hoverRating, setHoverRating] = useState(0);
+  const [text, setText] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void getOrderFeedback(orderNo).then((res) => {
+      if (!active) return;
+      if (res.ok && res.has_feedback) {
+        setRating(res.rating || 0);
+        setStatus("submitted");
+      } else {
+        setStatus("prompt");
+      }
+    });
+    return () => { active = false; };
+  }, [orderNo]);
+
+  const submit = async () => {
+    if (rating < 1) return;
+    setStatus("submitting");
+    try {
+      const res = await submitOrderFeedback(orderNo, rating, text);
+      if (res.ok) {
+        setStatus("submitted");
+      } else {
+        setStatus("error");
+        setErrorMsg(Object.values(res.errors || {})[0] || "Failed to submit feedback.");
+      }
+    } catch {
+      setStatus("error");
+      setErrorMsg("Network error.");
+    }
+  };
+
+  if (status === "loading") {
+    return <div className="p-4 text-center text-xs text-muted-foreground bg-surface-2 border-t border-border">Checking feedback...</div>;
+  }
+
+  if (status === "submitted") {
+    return (
+      <div className="flex items-center justify-between border-t border-border bg-surface-2 px-4 py-3 text-sm">
+        <span className="flex items-center gap-2 font-medium text-success">
+          <PartyPopper className="size-4" /> Feedback received
+        </span>
+        <span className="flex items-center gap-1">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Star key={i} className={cn("size-5", i < rating ? "fill-accent text-amber-600" : "text-amber-600/50")} />
+          ))}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t border-border bg-surface-2 p-4">
+      {status === "prompt" ? (
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <MessageSquare className="size-4 text-primary" />
+            How was your order?
+          </div>
+          <div className="flex gap-1" onMouseLeave={() => setHoverRating(0)}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => { setRating(i + 1); setStatus("form"); }}
+                onMouseEnter={() => setHoverRating(i + 1)}
+                className="cursor-pointer transition-colors hover:scale-110 active:scale-95"
+              >
+                <Star className={cn("size-8", (hoverRating || rating) > i ? "fill-accent text-amber-600" : "text-amber-600/50 hover:text-amber-600")} />
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">Rate your experience</span>
+            <div className="flex gap-1">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setRating(i + 1)}
+                  className="cursor-pointer transition-colors hover:scale-110 active:scale-95"
+                >
+                  <Star className={cn("size-8", rating > i ? "fill-accent text-amber-600" : "text-amber-600/50 hover:text-amber-600")} />
+                </button>
+              ))}
+            </div>
+          </div>
+          <textarea
+            placeholder="Tell us what you liked or what we can improve..."
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            className="flex min-h-[80px] w-full rounded-md border border-input bg-card px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-none"
+            disabled={status === "submitting"}
+          />
+          {status === "error" && (
+            <p className="text-xs text-destructive">{errorMsg}</p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => { setStatus("prompt"); setRating(0); setText(""); }}
+              disabled={status === "submitting"}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={submit}
+              disabled={rating < 1 || status === "submitting"}
+            >
+              {status === "submitting" ? "Submitting..." : "Submit"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

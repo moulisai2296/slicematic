@@ -1,16 +1,7 @@
-"""Authentication primitives for the API: hashing, JWTs, role dependencies.
+﻿"""Authentication helpers for the API/auth surface.
 
-Additive — nothing here is imported by core/ or the graded Gradio flow. Auth is
-deliberately simple for the demo threat model:
-
-  * Secrets (customer/staff PINs, admin password) are bcrypt-hashed at rest.
-  * A signed HS256 JWT (sub = user id, role) is issued on login; the frontend
-    sends it as `Authorization: Bearer <token>`.
-  * Brute-force lockout compensates for 6-digit PINs: after MAX_FAILED_ATTEMPTS
-    wrong secrets the account locks for LOCKOUT_MINUTES.
-
-Full per-endpoint authorization + rate limiting is the NEXT step; today only
-the /auth/employees admin endpoints use require_role.
+Auth is designed to fail closed for protected routes while leaving public
+menu/cart endpoints usable without any secrets.
 """
 
 from __future__ import annotations
@@ -36,7 +27,7 @@ _bearer = HTTPBearer(auto_error=False)
 def _jwt_secret() -> str:
     """Signing secret from env. A dev default keeps local runs friction-free;
     any real deploy must set AUTH_JWT_SECRET (see .env.example)."""
-    # ≥32 bytes so HS256 meets RFC 7518's minimum even in dev.
+    # â‰¥32 bytes so HS256 meets RFC 7518's minimum even in dev.
     return os.environ.get("AUTH_JWT_SECRET") or "slicematic-dev-only-secret-change-me"
 
 
@@ -52,7 +43,7 @@ def hash_secret(secret: str) -> str:
 def verify_secret(secret: str, secret_hash: str) -> bool:
     try:
         return bcrypt.checkpw(secret.encode("utf-8"), secret_hash.encode("utf-8"))
-    except ValueError:  # malformed hash in the row — treat as no match
+    except ValueError:  # malformed hash in the row â€” treat as no match
         return False
 
 
@@ -77,7 +68,7 @@ def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, _jwt_secret(), algorithms=[_ALGO])
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Session expired — sign in again.")
+        raise HTTPException(status_code=401, detail="Session expired â€” sign in again.")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid session token.")
 
@@ -97,7 +88,7 @@ def get_current_claims(
 
 
 def require_role(*roles: str):
-    """Dependency factory: valid token AND role ∈ roles (admin never implied)."""
+    """Dependency factory: valid token AND role âˆˆ roles (admin never implied)."""
 
     def _check(claims: dict = Depends(get_current_claims)) -> dict:
         if claims.get("role") not in roles:

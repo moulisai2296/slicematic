@@ -1,9 +1,8 @@
-"""Central config for the AI layer. Loads .env; fails fast on missing required vars.
+﻿"""Configuration for the conversational AI layer.
 
-`get_settings()` is lazy and cached: the graded path never calls it, so a missing
-OPENROUTER_API_KEY only stops the AI service from starting — it never touches the
-Gradio ordering flow. Optional integrations (Deepgram voice, Langfuse, Supabase)
-degrade gracefully when their keys are absent.
+Secrets are read lazily from environment variables so tests and local imports
+stay runnable without API keys. Optional integrations (Deepgram voice,
+Langfuse, Supabase) expose booleans instead of raising at import time.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ try:
     from dotenv import load_dotenv
 
     load_dotenv()
-except Exception:  # python-dotenv absent — env may still be set by the host
+except Exception:  # python-dotenv absent â€” env may still be set by the host
     pass
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -54,7 +53,7 @@ class Settings:
     brand: str = "SliceMatic"
     menu_dir: str = "menu_data"
     openrouter_base_url: str = OPENROUTER_BASE_URL
-    # Sarvam AI — full voice pipeline for Hindi + Indian English.
+    # Sarvam AI â€” full voice pipeline for Hindi + Indian English.
     # Saarika = STT (auto-detects language), Bulbul = TTS. Deepgram is fallback.
     sarvam_api_key: str | None = None
     sarvam_speaker: str = "anushka"
@@ -62,7 +61,7 @@ class Settings:
     sarvam_stt_model: str = "saarika:v2.5"
     # Real-time voice call (ai/sarvam_stream.py, ai/voice_call.py): bulbul:v3 for
     # native Hinglish code-mixing. v3 has its own speaker roster (v2 speakers like
-    # "abhilash" are invalid on v3) — kept separate from sarvam_speaker above so the
+    # "abhilash" are invalid on v3) â€” kept separate from sarvam_speaker above so the
     # batch REST path (ai/sarvam.py, still on bulbul:v2) is unaffected.
     sarvam_v3_speaker: str = "ratan"
 

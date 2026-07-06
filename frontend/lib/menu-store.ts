@@ -12,13 +12,14 @@ import {
   priceCart,
 } from "@/lib/api";
 
-export const MAX_TOPPINGS = 3;
+export const MAX_TOPPINGS = Number.POSITIVE_INFINITY;
 
 /** One committed pizza in the cart (a distinct base + pizza + toppings combo). */
 export interface CartLine {
   id: string;
-  pizza: MenuItem;
-  base: MenuItem;
+  item: MenuItem;
+  size_code: string | null;
+  crust: MenuItem | null;
   toppings: MenuItem[];
   quantity: number;
 }
@@ -31,8 +32,10 @@ function newId() {
 
 export function toPayload(line: CartLine): CartLinePayload {
   return {
-    base_id: line.base.id,
-    pizza_id: line.pizza.id,
+    item_id: line.item.id,
+    item_type: line.item.item_type || "generic",
+    size_code: line.size_code,
+    crust_id: line.crust?.id || null,
     topping_ids: line.toppings.map((t) => t.id),
     quantity: line.quantity,
   };

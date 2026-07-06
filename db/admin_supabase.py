@@ -333,6 +333,7 @@ def update_order_status(
     performed_by: str,
     reason: str | None = None,
 ) -> dict:
+    new_status = new_status.strip().lower()
     if new_status not in ORDER_STATUSES:
         raise ValueError("Unsupported order status.")
     old = _one(
@@ -375,11 +376,9 @@ def list_staff_orders(limit: int = 50) -> list[dict]:
         r for r in list_orders(limit=500) if r.get("status") in STAFF_ORDER_STATUSES
     ]
     order_rank = {
-        "Confirmed": 1,
         "confirmed": 1,
-        "Preparing": 2,
-        "Ready": 3,
-        "Created": 4,
+        "preparing": 2,
+        "ready_for_pickup": 3,
         "received": 4,
     }
     return sorted(
@@ -420,6 +419,7 @@ def create_staff_order(
     total: float,
     payment_mode: str,
     performed_by: str,
+    type: str = "dine_in",
 ) -> dict:
     if payment_mode not in {"Cash", "Card", "UPI"}:
         raise ValueError("Unsupported payment mode.")
@@ -439,8 +439,8 @@ def create_staff_order(
                     "gst": gst,
                     "total": total,
                     "payment_mode": payment_mode,
-                    "status": "received",
-                    "type": "pos",
+                    "status": "confirmed",
+                    "type": type,
                 }
             )
         )
@@ -490,6 +490,26 @@ def list_menu_items() -> dict:
     return {"items": items, "categories": categories}
 
 
+def _increment_menu_version():
+    client_instance = _client()
+    resp = execute_query(
+        client_instance.table("app_settings").select("value").eq("id", "menu_version").limit(1)
+    )
+    rows = getattr(resp, "data", None) or []
+    if rows:
+        current = rows[0].get("value", {}).get("value", 1)
+        execute_query(
+            client_instance.table("app_settings")
+            .update({"value": {"value": current + 1}})
+            .eq("id", "menu_version")
+        )
+    else:
+        execute_query(
+            client_instance.table("app_settings")
+            .insert({"id": "menu_version", "value": {"value": 2}})
+        )
+
+
 def create_menu_category(
     *,
     code: str,
@@ -529,6 +549,7 @@ def create_menu_category(
         performed_by=performed_by,
         reason=reason,
     )
+    _increment_menu_version()
     return row
 
 
@@ -561,6 +582,7 @@ def delete_menu_category(category_id: str, performed_by: str) -> dict:
         performed_by=performed_by,
         reason="Admin hard delete",
     )
+    _increment_menu_version()
     return deleted
 
 
@@ -620,6 +642,7 @@ def create_menu_item(
         performed_by=performed_by,
         reason=reason,
     )
+    _increment_menu_version()
     return row
 
 
@@ -629,6 +652,7 @@ def update_menu_item(
     name: str,
     price: float,
     is_available: bool,
+    image_url: str | None = None,
     performed_by: str,
     reason: str | None = None,
 ) -> dict:
@@ -643,18 +667,21 @@ def update_menu_item(
     )
     if not old or old.get("is_deleted"):
         raise LookupError("Menu item not found.")
+        
+    update_data = {
+        "name": name.strip(),
+        "price": price,
+        "is_available": is_available,
+        "updated_at": _now(),
+    }
+    if image_url is not None:
+        update_data["image_url"] = image_url
+
     row = _one(
         execute_query(
             _client()
             .table("menu_items")
-            .update(
-                {
-                    "name": name.strip(),
-                    "price": price,
-                    "is_available": is_available,
-                    "updated_at": _now(),
-                }
-            )
+            .update(update_data)
             .eq("id", item_id)
         )
     )
@@ -694,6 +721,7 @@ def update_menu_item(
         performed_by=performed_by,
         reason=reason,
     )
+    _increment_menu_version()
     return row
 
 
@@ -724,6 +752,7 @@ def soft_delete_menu_item(
         performed_by=performed_by,
         reason=reason,
     )
+    _increment_menu_version()
     return row
 
 
@@ -1093,6 +1122,77 @@ def update_staff(
         reason=reason,
     )
     return updated
+
+
+def delete_staff(
+    staff_id: str,
+    *,
+    performed_by: str,
+    reason: str | None = None,
+) -> dict:
+    profile = _one(
+        execute_query(
+            _client().table("staff_profiles").select("*").eq("id", staff_id).limit(1)
+        )
+    )
+    if not profile:
+        raise LookupError("Staff member not found.")
+    if str(profile.get("user_id")) == str(performed_by):
+        raise ValueError("You cannot remove your own staff/admin account.")
+    user = (
+        _one(
+            execute_query(
+                _client()
+                .table("app_users")
+                .select("*")
+                .eq("id", profile["user_id"])
+                .limit(1)
+            )
+        )
+        or {}
+    )
+    old = {
+        **profile,
+        "full_name": user.get("full_name") or user.get("name"),
+        "email": user.get("email"),
+        "phone": user.get("phone"),
+        "status": user.get("status", "active"),
+    }
+    updated_user = (
+        _one(
+            execute_query(
+                _client()
+                .table("app_users")
+                .update({"status": "inactive"})
+                .eq("id", profile["user_id"])
+            )
+        )
+        or {}
+    )
+    role = next((r for r in _select("roles") if r.get("name") == profile["role_name"]), None)
+    if role:
+        execute_query(
+            _client()
+            .table("user_roles")
+            .delete()
+            .eq("user_id", profile["user_id"])
+            .eq("role_id", role["id"])
+        )
+    execute_query(_client().table("staff_profiles").delete().eq("id", staff_id))
+    deleted = {
+        **old,
+        "status": updated_user.get("status", "inactive"),
+    }
+    _audit(
+        action_type="staff.deleted",
+        entity_type="staff_profile",
+        entity_id=staff_id,
+        old_value=old,
+        new_value=deleted,
+        performed_by=performed_by,
+        reason=reason,
+    )
+    return deleted
 
 
 def list_payments_and_refunds() -> dict:

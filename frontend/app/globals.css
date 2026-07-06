@@ -9,52 +9,9 @@
  * See lib/themes.ts for the registry that drives the theme switcher.
  * ------------------------------------------------------------------ */
 
-/* Default palette = Signature (SliceMatic house palette).
- * Domino's-style — bold red/blue/white fast-food branding. Clean white
- * dominates every surface; fire-engine red is the single dominant
- * accent/CTA ("Order Now", "Add to Cart"); navy blue is a strong
- * contrast/nav highlight (header, tab bar); light grey carries
- * cards/tags/secondary surfaces; a slightly darker grey handles dividers. */
+/* Dark Mode (former midnight) */
 :root,
-[data-theme="brand"] {
-  color-scheme: light;
-
-  --background: #ffffff;          /* clean white — dominant surface */
-  --backdrop: #eef0f3;            /* desktop gutters behind the phone frame */
-  --foreground: #1a1a1a;          /* near-black text */
-
-  --card: #ffffff;                /* white card */
-  --card-foreground: #1a1a1a;
-
-  --surface: #ffffff;             /* composer, tab bar */
-  --surface-2: #f2f2f2;           /* chips, inputs — light grey tint */
-
-  --primary: #e31837;             /* fire-engine red — the one dominant accent / CTA */
-  --primary-foreground: #ffffff;  /* white text on red */
-  --secondary: #f2f2f2;           /* light grey — secondary surfaces / tags */
-  --secondary-foreground: #1a1a1a;
-  --accent: #0c2340;              /* navy blue — strong contrast / nav highlight */
-  --accent-foreground: #ffffff;
-
-  --muted: #f2f2f2;               /* light grey — muted panels */
-  --muted-foreground: #6b6b6b;    /* muted text */
-
-  --border: #e0e0e0;              /* light divider */
-  --input: #e0e0e0;
-  --ring: #e31837;                /* red focus ring */
-
-  --success: #0c2340;             /* navy — positive/confirmed states */
-  --destructive: #b3122a;         /* deeper red — error (distinct from CTA) */
-  --destructive-foreground: #ffffff;
-
-  /* AI/user chat bubble tints */
-  --bubble-ai: #f2f2f2;
-  --bubble-user: #e31837;         /* fire-engine red — dominant accent */
-  --bubble-user-foreground: #ffffff;
-}
-
-/* Midnight (dark, amber) — alternate */
-[data-theme="midnight"] {
+[data-theme="dark"] {
   color-scheme: dark;
 
   --background: #0c0a09;
@@ -90,77 +47,43 @@
   --bubble-user-foreground: #1c1917;
 }
 
-/* Classic Orange + Blue (light) */
-[data-theme="classic"] {
+/* Fresh Basil & Dough Light Theme */
+[data-theme="bright"] {
   color-scheme: light;
 
-  --background: #fff7ed;
-  --backdrop: #f0e2d1;
-  --foreground: #0f172a;
+  --backdrop: #fde68a; /* Bright warm amber/dough behind app (the bright colour!) */
+  
+  --background: #f5f0e8; /* Warm cream — clearly different from white cards */
+  --foreground: #1c1917; /* Deep brown/slate text for readability */
 
-  --card: #ffffff;
-  --card-foreground: #0f172a;
-
-  --surface: #ffffff;
-  --surface-2: #fdf4f0;
-
-  --primary: #ea580c;
-  --primary-foreground: #ffffff;
-  --secondary: #f97316;
-  --secondary-foreground: #ffffff;
-  --accent: #2563eb;
-  --accent-foreground: #ffffff;
-
-  --muted: #fdf4f0;
-  --muted-foreground: #64748b;
-
-  --border: #fceae1;
-  --input: #fceae1;
-  --ring: #ea580c;
-
-  --success: #16a34a;
-  --destructive: #dc2626;
-  --destructive-foreground: #ffffff;
-
-  --bubble-ai: #ffffff;
-  --bubble-user: #ea580c;
-  --bubble-user-foreground: #ffffff;
-}
-
-/* Fresh Basil (light, tomato + green) */
-[data-theme="basil"] {
-  color-scheme: light;
-
-  --background: #fffbeb;
-  --backdrop: #efe6d2;
-  --foreground: #1c1917;
-
-  --card: #ffffff;
+  --card: #e8eccc; /* Warm yellowish olive-green — distinct from cream background */
   --card-foreground: #1c1917;
 
-  --surface: #ffffff;
-  --surface-2: #f7f1e3;
+  --surface: #f0f2de; /* Slightly lighter olive for panels */
+  --surface-2: #e4e7c0; /* Subtle olive-sand for inputs/chips */
 
-  --primary: #dc2626;
+  --primary: #d92d20; /* Tomato Red */
   --primary-foreground: #ffffff;
-  --secondary: #ef4444;
+  
+  --secondary: #166534; /* GOOD GREEN (Fresh Basil) for headers/footers */
   --secondary-foreground: #ffffff;
-  --accent: #16a34a;
-  --accent-foreground: #ffffff;
+  
+  --accent: #f59e0b; /* Cheese yellow */
+  --accent-foreground: #1c1917;
 
-  --muted: #f3ecdd;
-  --muted-foreground: #6b7280;
+  --muted: #f1f0ea;
+  --muted-foreground: #57534e; /* Stone-600 */
 
-  --border: #ece0cb;
-  --input: #ece0cb;
-  --ring: #dc2626;
+  --border: #e7e5e4;
+  --input: #e7e5e4;
+  --ring: #d92d20;
 
   --success: #16a34a;
-  --destructive: #b91c1c;
+  --destructive: #dc2626; 
   --destructive-foreground: #ffffff;
 
   --bubble-ai: #ffffff;
-  --bubble-user: #dc2626;
+  --bubble-user: #d92d20;
   --bubble-user-foreground: #ffffff;
 }
 

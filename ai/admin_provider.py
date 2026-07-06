@@ -71,8 +71,10 @@ class OpenAICompatibleAdminAIProvider:
                     "role": "system",
                     "content": (
                         "You are SliceMatic Admin AI. Rewrite each insight in "
-                        "clear business language. Do not invent metrics. Return "
-                        "only JSON array items with type and text."
+                        "clear business language. You may expand on the insights to provide "
+                        "actionable business suggestions (like marketing or coupon ideas). "
+                        "However, you MUST NOT invent fake metrics or data points. "
+                        "Return only a valid JSON array of objects with 'type' and 'text'."
                     ),
                 },
                 {
@@ -110,10 +112,12 @@ class GeminiAdminAIProvider:
                     "parts": [
                         {
                             "text": (
-                                "Rewrite SliceMatic admin insights using only "
-                                "the supplied metrics. Return only a valid JSON "
-                                "array. Each item must have type and text. "
-                                "Do not include markdown or commentary. "
+                                "You are SliceMatic Admin AI. Rewrite each admin insight in "
+                                "clear business language. You may expand on the original text "
+                                "to provide actionable business suggestions (e.g., marketing ideas "
+                                "or coupon suggestions), but DO NOT invent fake data or metrics. "
+                                "Return only a valid JSON array. Each item must have 'type' and 'text'. "
+                                "Do not include markdown or commentary outside the JSON array. "
                                 + json.dumps(
                                     {"insights": insights},
                                     default=str,

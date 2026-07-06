@@ -1,6 +1,5 @@
-"""Stage 3 conversational AI layer (chat + voice).
+﻿"""Conversational AI package for SliceMatic Stage 3.
 
-Orchestration only — all business logic stays in core/ and is reached via the
-tool executor in ai/tools.py. This package may import core/ and db/, but core/
-never imports ai/, so the graded ordering path runs without any of this.
+FastAPI routes import this package explicitly; core business logic remains in
+core/ so pricing and validation stay deterministic.
 """

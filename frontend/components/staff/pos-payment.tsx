@@ -5,19 +5,81 @@ import {
   Banknote,
   Check,
   CreditCard,
+  Gift,
   Loader2,
   Phone,
   ShoppingBag,
   Smartphone,
+  Tag,
   User,
   UtensilsCrossed,
+  X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { checkoutCart } from "@/lib/api";
+import { Input } from "@/components/ui/input";
+import {
+  type CouponRule,
+  checkoutCart,
+  listAvailableCoupons,
+  validateCoupon,
+} from "@/lib/api";
 import { toPayload, useStaffPos } from "@/lib/staff-store";
-import { cn, formatINR } from "@/lib/utils";
+import { cn, formatINR, roundFinalAmount } from "@/lib/utils";
+
+// ── Coupon picker popup (same as customer checkout) ────────────────────────
+
+function CouponPicker({
+  coupons,
+  onSelect,
+  onClose,
+}: {
+  coupons: CouponRule[];
+  onSelect: (code: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center">
+      <div className="w-full max-w-md rounded-t-2xl border border-border bg-card sm:rounded-2xl">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Gift className="size-5 text-primary" />
+            <span className="font-heading text-base font-semibold">Available Coupons</span>
+          </div>
+          <button type="button" onClick={onClose} className="grid size-8 cursor-pointer place-items-center rounded-full text-muted-foreground transition-colors hover:bg-surface-2">
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="slick-scroll max-h-[55vh] overflow-y-auto p-3 space-y-2">
+          {coupons.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">No coupons available right now.</p>
+          ) : (
+            coupons.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => { onSelect(c.coupon_code); onClose(); }}
+                className="group flex w-full cursor-pointer items-start gap-3 rounded-xl border border-dashed border-primary/40 bg-primary/5 p-3.5 text-left transition-colors hover:border-primary hover:bg-primary/10"
+              >
+                <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/15 text-primary">
+                  <Tag className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-mono text-sm font-bold tracking-wider text-primary">{c.coupon_code}</span>
+                  <span className="block text-sm font-medium">{c.name} — {c.discount_percent}% off</span>
+                  {c.description && <span className="block text-xs text-muted-foreground">{c.description}</span>}
+                  {c.threshold_amount > 0 && <span className="block text-xs text-muted-foreground">Min. order {formatINR(c.threshold_amount)}</span>}
+                </span>
+                <span className="shrink-0 text-xs font-medium text-primary opacity-0 transition-opacity group-hover:opacity-100">Apply →</span>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /**
  * POS step 3 — take payment at the counter. Mirrors the customer checkout
@@ -71,11 +133,76 @@ export function PosPayment() {
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Coupon state
+  const [couponInput, setCouponInput] = useState("");
+  const [couponApplied, setCouponApplied] = useState<{
+    code: string;
+    name: string;
+    discountPercent: number;
+    discountAmount: number;
+    savings: number;
+    newTotal: number;
+  } | null>(null);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
+  const [availableCoupons, setAvailableCoupons] = useState<CouponRule[]>([]);
+  const [couponsLoaded, setCouponsLoaded] = useState(false);
+
   // Re-price on entry so the totals are always the server's latest numbers
-  // (same safeguard as the customer checkout).
   useEffect(() => {
     void reprice();
   }, [reprice]);
+
+  const loadCoupons = useCallback(async () => {
+    if (couponsLoaded) return;
+    try {
+      const res = await listAvailableCoupons();
+      setAvailableCoupons(res.coupons ?? []);
+    } catch {
+      setAvailableCoupons([]);
+    } finally {
+      setCouponsLoaded(true);
+    }
+  }, [couponsLoaded]);
+
+  const handleApplyCoupon = useCallback(async (code: string) => {
+    const raw = code.trim().toUpperCase();
+    if (!raw || !totals) return;
+    setCouponLoading(true);
+    setCouponError(null);
+    try {
+      const res = await validateCoupon(raw, totals.total);
+      if (!res.ok) {
+        setCouponError(Object.values(res.errors ?? {})[0] ?? "Invalid coupon.");
+        setCouponApplied(null);
+      } else {
+        setCouponApplied({
+          code: res.coupon_code!,
+          name: res.coupon_name!,
+          discountPercent: res.discount_percent!,
+          discountAmount: res.discount_amount!,
+          savings: res.savings!,
+          newTotal: res.new_total!,
+        });
+        setCouponError(null);
+        setCouponInput(res.coupon_code!);
+      }
+    } catch {
+      setCouponError("Couldn't validate coupon.");
+    } finally {
+      setCouponLoading(false);
+    }
+  }, [totals]);
+
+  const removeCoupon = () => {
+    setCouponApplied(null);
+    setCouponInput("");
+    setCouponError(null);
+  };
+
+  const finalTotal = couponApplied ? couponApplied.newTotal : totals?.total;
+  const finalSavings = couponApplied ? couponApplied.savings : 0;
 
   const method = METHODS.find((m) => m.id === methodId)!;
   const canPlace = ticket.length > 0 && !processing;
@@ -85,22 +212,20 @@ export function PosPayment() {
     setError(null);
     setProcessing(true);
 
-    // Simulated payment step for UPI/card (no real gateway) — same as customer.
     if (method.id === "upi" || method.id === "card") {
       await new Promise((r) => setTimeout(r, 1600));
     }
 
     try {
       const res = await checkoutCart({
-        user_id: "", // walk-in customer — no account
+        user_id: "",
         name: customerName,
         phone: customerPhone,
         payment_mode: method.mode,
-        address: "", // in-store order — no delivery
-        // Real seating type, not a generic "store" tag — lets the queue
-        // filter by Dine In / Takeaway on actual saved orders.
+        address: "",
         type: orderType,
         lines: ticket.map(toPayload),
+        ...(couponApplied ? { coupon_code: couponApplied.code } : {}),
       });
       if (!res.ok || !res.order_no) {
         const first = res.errors ? Object.values(res.errors)[0] : null;
@@ -108,7 +233,7 @@ export function PosPayment() {
         setProcessing(false);
         return;
       }
-      const placedTotal = res.total ?? totals?.total ?? 0;
+      const placedTotal = couponApplied?.newTotal ?? res.total ?? totals?.total ?? 0;
       clearTicket();
       setPlaced(res.order_no, placedTotal);
     } catch {
@@ -220,6 +345,62 @@ export function PosPayment() {
             </div>
           </section>
 
+          {/* Coupon section */}
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Coupon / Promo</h3>
+              <button
+                id="pos-view-coupons"
+                type="button"
+                onClick={() => { void loadCoupons(); setShowPicker(true); }}
+                className="flex cursor-pointer items-center gap-1 text-xs font-medium text-primary hover:underline"
+              >
+                <Gift className="size-3.5" />
+                View available
+              </button>
+            </div>
+            {couponApplied ? (
+              <div className="flex items-center gap-3 rounded-xl border border-green-500/40 bg-green-500/10 px-3.5 py-3">
+                <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-green-500/20 text-green-600 dark:text-green-400">
+                  <Tag className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-mono text-sm font-bold tracking-wider text-green-600 dark:text-green-400">{couponApplied.code}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {couponApplied.name} — {couponApplied.discountPercent}% off · saving{" "}
+                    <span className="font-medium text-green-600 dark:text-green-400">{formatINR(couponApplied.savings)}</span>
+                  </span>
+                </span>
+                <button type="button" onClick={removeCoupon} aria-label="Remove coupon"
+                  className="grid size-7 cursor-pointer place-items-center rounded-full text-muted-foreground transition-colors hover:bg-surface-2">
+                  <X className="size-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <Input
+                  id="pos-coupon-input"
+                  className="bg-card font-mono tracking-wider uppercase"
+                  placeholder="Enter coupon code"
+                  value={couponInput}
+                  onChange={(e) => { setCouponInput(e.target.value.toUpperCase()); setCouponError(null); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") void handleApplyCoupon(couponInput); }}
+                />
+                <Button
+                  id="pos-apply-coupon"
+                  type="button"
+                  variant="secondary"
+                  disabled={!couponInput.trim() || couponLoading}
+                  onClick={() => void handleApplyCoupon(couponInput)}
+                  className="shrink-0"
+                >
+                  {couponLoading ? <Loader2 className="size-4 animate-spin" /> : "Apply"}
+                </Button>
+              </div>
+            )}
+            {couponError && <p className="text-xs text-destructive">{couponError}</p>}
+          </section>
+
           {/* Order summary — same rows as the customer checkout */}
           <section className="space-y-3">
             <h3 className="text-sm font-semibold">Order summary</h3>
@@ -228,10 +409,13 @@ export function PosPayment() {
                 <li key={l.id} className="flex justify-between gap-3 text-sm">
                   <span className="min-w-0">
                     <span className="font-medium">
-                      {l.quantity}× {l.pizza.name}
+                      {l.quantity}× {l.item.name} {l.size_code && `(${l.size_code})`}
                     </span>
                     <span className="block truncate text-xs text-muted-foreground">
-                      {l.base.name} · {l.toppings.map((t) => t.name).join(", ")}
+                      {l.crust?.name ? `${l.crust.name}` : ""}
+                      {l.crust && l.toppings.length > 0 ? " · " : ""}
+                      {l.toppings.length > 0 ? l.toppings.map((t) => t.name).join(", ") : ""}
+                      {!l.crust && l.toppings.length === 0 && l.item.category_code !== 'pizza' ? l.item.item_type || '' : ""}
                     </span>
                   </span>
                 </li>
@@ -239,23 +423,19 @@ export function PosPayment() {
               {totals && totals.discount > 0 && (
                 <li className="flex justify-between border-t border-border pt-2 text-sm text-success">
                   <span>Bulk discount</span>
-                  <span className="tabular-nums">
-                    −{formatINR(totals.discount)}
-                  </span>
+                  <span className="tabular-nums">−{formatINR(totals.discount)}</span>
                 </li>
               )}
-              <li
-                className={cn(
-                  "flex justify-between text-sm text-muted-foreground",
-                  !(totals && totals.discount > 0) &&
-                    "border-t border-border pt-2"
-                )}
-              >
+              <li className={cn("flex justify-between text-sm text-muted-foreground", !(totals && totals.discount > 0) && "border-t border-border pt-2")}>
                 <span>GST (18%) included</span>
-                <span className="tabular-nums">
-                  {totals ? formatINR(totals.gst) : "…"}
-                </span>
+                <span className="tabular-nums">{totals ? formatINR(totals.gst) : "…"}</span>
               </li>
+              {couponApplied && (
+                <li className="flex justify-between text-sm text-green-600 dark:text-green-400">
+                  <span>Coupon savings ({couponApplied.code})</span>
+                  <span className="tabular-nums">−{formatINR(couponApplied.savings)}</span>
+                </li>
+              )}
             </ul>
           </section>
 
@@ -270,18 +450,22 @@ export function PosPayment() {
         </div>
       </div>
 
-      {/* Sticky place-order footer — same as the customer checkout */}
+      {/* Sticky place-order footer */}
       <div className="shrink-0 border-t border-border bg-surface px-6 py-4">
         <div className="mx-auto flex w-full max-w-xl items-center gap-3">
           <div className="min-w-0">
-            <span className="block text-xs text-muted-foreground">
-              Total payable
-            </span>
-            <span className="font-heading text-xl font-bold tabular-nums">
-              {totals ? formatINR(totals.total) : "…"}
-            </span>
+            <span className="block text-xs text-muted-foreground">Total payable</span>
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-heading text-xl font-bold tabular-nums">
+                {finalTotal != null ? formatINR(roundFinalAmount(finalTotal)) : "…"}
+              </span>
+              {finalSavings > 0 && (
+                <span className="text-xs font-medium text-green-600 dark:text-green-400">({formatINR(finalSavings)} saved)</span>
+              )}
+            </div>
           </div>
           <Button
+            id="pos-place-order"
             size="lg"
             className="h-14 flex-1 text-base"
             disabled={!canPlace}
@@ -291,29 +475,34 @@ export function PosPayment() {
               ? "Placing…"
               : method.id === "cash"
                 ? "Place order"
-                : `Pay ${totals ? formatINR(totals.total) : ""}`}
+                : `Pay ${finalTotal != null ? formatINR(roundFinalAmount(finalTotal)) : ""}`}
           </Button>
         </div>
       </div>
 
-      {/* Simulated UPI/card processing overlay — mirrors the customer checkout. */}
+      {/* Simulated UPI/card processing overlay */}
       {processing && method.id !== "cash" && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-background/90 backdrop-blur-sm">
           <Loader2 className="size-12 animate-spin text-primary" />
           <div className="text-center">
             <p className="font-heading text-xl font-semibold">
-              {method.id === "card"
-                ? "Processing card payment"
-                : "Waiting for UPI payment"}
+              {method.id === "card" ? "Processing card payment" : "Waiting for UPI payment"}
             </p>
             <p className="text-sm text-muted-foreground">
-              {totals ? formatINR(totals.total) : ""} ·{" "}
-              {method.id === "card"
-                ? "complete on the card machine"
-                : "ask the customer to approve"}
+              {finalTotal != null ? formatINR(finalTotal) : ""} ·{" "}
+              {method.id === "card" ? "complete on the card machine" : "ask the customer to approve"}
             </p>
           </div>
         </div>
+      )}
+
+      {/* Coupon picker popup */}
+      {showPicker && (
+        <CouponPicker
+          coupons={availableCoupons}
+          onSelect={(code) => { setCouponInput(code); void handleApplyCoupon(code); }}
+          onClose={() => setShowPicker(false)}
+        />
       )}
     </div>
   );

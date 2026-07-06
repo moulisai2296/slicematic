@@ -144,7 +144,7 @@ export function CustomerAuthScreens() {
           </Field>
 
           <Field
-            label={mode === "signin" ? "6-digit PIN" : "Choose a 6-digit PIN"}
+            label={mode === "signin" ? "Password" : "Choose a Password"}
             htmlFor="auth-pin"
           >
             <Input
@@ -161,7 +161,7 @@ export function CustomerAuthScreens() {
           </Field>
 
           {mode === "signup" && (
-            <Field label="Confirm PIN" htmlFor="auth-pin2">
+            <Field label="Confirm Password" htmlFor="auth-pin2">
               <Input
                 id="auth-pin2"
                 type="password"
@@ -174,7 +174,7 @@ export function CustomerAuthScreens() {
                 aria-invalid={confirmPin.length > 0 && confirmPin !== pin}
               />
               {confirmPin.length > 0 && confirmPin !== pin && (
-                <Hint>PINs don&apos;t match.</Hint>
+                <Hint>Passwords don&apos;t match.</Hint>
               )}
             </Field>
           )}

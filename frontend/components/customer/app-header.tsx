@@ -23,18 +23,15 @@ export function AppHeader() {
   if (HIDE_ON.some((p) => pathname.startsWith(p))) return null;
 
   return (
-    <header className="grid h-12 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-border bg-surface px-3">
-      {/* left spacer keeps the brand centered */}
-      <div aria-hidden />
-
+    <header className="flex h-12 shrink-0 items-center justify-between border-b border-secondary bg-secondary px-3 text-secondary-foreground">
       <Link
         href="/"
-        className="flex items-center justify-center gap-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex items-center gap-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <span className="grid size-7 place-items-center rounded-lg bg-primary text-primary-foreground">
           <Pizza className="size-4" />
         </span>
-        <span className="font-heading text-lg font-bold tracking-tight">
+        <span className="font-heading text-lg font-bold tracking-tight text-secondary-foreground">
           SliceMatic
         </span>
       </Link>
@@ -47,7 +44,7 @@ export function AppHeader() {
             resetChat();
             if (pathname !== "/") window.location.href = "/";
           }}
-          className="relative grid size-9 cursor-pointer place-items-center rounded-full text-foreground transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-5"
+          className="relative grid size-9 cursor-pointer place-items-center rounded-full text-secondary-foreground transition-colors hover:bg-secondary-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-5"
         >
           <RotateCcw />
         </button>
@@ -56,7 +53,7 @@ export function AppHeader() {
           type="button"
           aria-label={`View order${count ? `, ${count} item${count === 1 ? "" : "s"}` : ""}`}
           onClick={openCart}
-          className="relative grid size-9 cursor-pointer place-items-center rounded-full text-foreground transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-5"
+          className="relative grid size-9 cursor-pointer place-items-center rounded-full text-secondary-foreground transition-colors hover:bg-secondary-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-5"
         >
           <ShoppingBag />
           {count > 0 && (
@@ -69,7 +66,7 @@ export function AppHeader() {
         <Link
           href="/profile"
           aria-label="Your profile"
-          className="grid size-9 cursor-pointer place-items-center rounded-full border border-border bg-surface-2 text-xs font-bold text-foreground transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="grid size-9 cursor-pointer place-items-center rounded-full border border-secondary-foreground/20 bg-secondary-foreground/10 text-xs font-bold text-secondary-foreground transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {initials(user?.name ?? "")}
         </Link>

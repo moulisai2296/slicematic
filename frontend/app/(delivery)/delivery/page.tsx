@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
+  acceptOrder,
   getDeliveryStats,
   getRecentOrders,
   updateOrderStatus,
@@ -26,6 +27,7 @@ import {
   type UserOrder,
 } from "@/lib/api";
 import { useAuthStore, useRoleUser } from "@/lib/auth-store";
+import { useRealtime } from "@/lib/useRealtime";
 import { cn, formatINR } from "@/lib/utils";
 
 /** Ideas surfaced for later prioritization — not built, just kept visible on
@@ -95,7 +97,7 @@ function TabButton({
  * per card advancing the order (db/orders.py's status state machine).
  */
 function QueueTab() {
-  const { token } = useRoleUser("delivery");
+  const { user, token } = useRoleUser("delivery");
   const [orders, setOrders] = useState<UserOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -128,9 +130,10 @@ function QueueTab() {
 
   useEffect(() => {
     void load();
-    const t = setInterval(() => void load(), 15000);
-    return () => clearInterval(t);
   }, [load]);
+
+  // Real-time updates and fallback polling
+  useRealtime(["order_created", "order_status_updated"], load, load);
 
   const advance = async (order: UserOrder, nextStatus: string) => {
     if (!token || busyOrder) return;
@@ -150,10 +153,33 @@ function QueueTab() {
     }
   };
 
+  const claim = async (order: UserOrder) => {
+    if (!token || busyOrder) return;
+    setBusyOrder(order.order_no);
+    try {
+      const res = await acceptOrder(order.order_no, token);
+      if (res.ok) {
+        await load();
+      } else {
+        const first = res.errors ? Object.values(res.errors)[0] : null;
+        setError(first ?? "This order is no longer available or already accepted by another rider.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't claim that order.");
+    } finally {
+      setBusyOrder(null);
+    }
+  };
+
+  const myDeliveries = orders.filter((o) => o.rider_id === user?.id);
+  const availableDeliveries = orders.filter(
+    (o) => !o.rider_id && o.status === "ready_for_pickup"
+  );
+
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-3 px-4 py-4">
+    <div className="mx-auto w-full max-w-2xl space-y-6 px-4 py-4">
       <div className="flex items-center justify-between">
-        <h1 className="font-heading text-lg font-bold">Orders</h1>
+        <h1 className="font-heading text-lg font-bold text-foreground">Delivery Board</h1>
         <button
           type="button"
           onClick={() => void load()}
@@ -173,35 +199,63 @@ function QueueTab() {
         </div>
       )}
 
-      {loading && orders.length === 0 && (
-        <>
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div
-              key={i}
-              className="h-32 animate-pulse rounded-xl border border-border bg-surface-2"
+      {/* Section 1: My Active Deliveries */}
+      <div className="space-y-3">
+        <h2 className="text-sm font-bold text-primary flex items-center gap-1.5">
+          <Bike className="size-4" /> My Active Deliveries ({myDeliveries.length})
+        </h2>
+        {myDeliveries.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground bg-card/30">
+            No active deliveries. Claim available orders below!
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {myDeliveries.map((o) => (
+              <OrderCard
+                key={o.order_no}
+                order={o}
+                busy={busyOrder === o.order_no}
+                onAdvance={advance}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Section 2: Available to Claim */}
+      <div className="space-y-3">
+        <h2 className="text-sm font-bold text-foreground flex items-center gap-1.5 border-t border-border pt-4">
+          <Package className="size-4 text-muted-foreground" /> Available to Claim ({availableDeliveries.length})
+        </h2>
+        {loading && orders.length === 0 && (
+          <div className="space-y-3">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div
+                key={i}
+                className="h-32 animate-pulse rounded-xl border border-border bg-surface-2"
+              />
+            ))}
+          </div>
+        )}
+
+        {!loading && availableDeliveries.length === 0 && (
+          <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground bg-card/30">
+            No available orders to claim right now.
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {availableDeliveries.map((o) => (
+            <OrderCard
+              key={o.order_no}
+              order={o}
+              busy={busyOrder === o.order_no}
+              onAdvance={advance}
+              onClaim={claim}
             />
           ))}
-        </>
-      )}
-
-      {!loading && !error && orders.length === 0 && (
-        <div className="flex flex-col items-center gap-3 py-16 text-center">
-          <Package className="size-9 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">
-            Nothing to deliver right now — orders show up here once the
-            kitchen marks them ready.
-          </p>
         </div>
-      )}
-
-      {orders.map((o) => (
-        <OrderCard
-          key={o.order_no}
-          order={o}
-          busy={busyOrder === o.order_no}
-          onAdvance={advance}
-        />
-      ))}
+      </div>
     </div>
   );
 }
@@ -210,14 +264,17 @@ function OrderCard({
   order,
   busy,
   onAdvance,
+  onClaim,
 }: {
   order: UserOrder;
   busy: boolean;
   onAdvance: (order: UserOrder, nextStatus: string) => void;
+  onClaim?: (order: UserOrder) => void;
 }) {
   const placed = new Date(order.created_at);
   const items = order.items ?? [];
   const isOutForDelivery = order.status === "out_for_delivery";
+  const isClaimed = !!order.rider_id;
 
   return (
     <Card className="space-y-3 p-4">
@@ -228,15 +285,15 @@ function OrderCard({
             {Number.isNaN(placed.getTime())
               ? "—"
               : placed.toLocaleString("en-IN", {
-                  day: "numeric",
-                  month: "short",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+                day: "numeric",
+                month: "short",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
           </p>
         </div>
-        <Badge variant={isOutForDelivery ? "primary" : "default"}>
-          {isOutForDelivery ? "Out for delivery" : "Ready for pickup"}
+        <Badge variant={isOutForDelivery ? "primary" : isClaimed ? "success" : "default"}>
+          {isOutForDelivery ? "Out for delivery" : isClaimed ? "Assigned" : "Ready to Claim"}
         </Badge>
       </div>
 
@@ -249,9 +306,10 @@ function OrderCard({
         {items.map((it, i) => (
           <p key={i} className="text-muted-foreground">
             <span className="font-medium text-foreground">
-              {it.quantity}× {it.pizza}
+              {it.quantity}× {it.item_name}
             </span>{" "}
-            · {it.base}
+            {it.crust ? `· ${it.crust}` : ""}
+            {it.toppings && it.toppings.length > 0 ? ` · ${it.toppings.join(", ")}` : ""}
           </p>
         ))}
       </div>
@@ -272,15 +330,25 @@ function OrderCard({
         </span>
       </div>
 
-      <Button
-        className="w-full"
-        disabled={busy}
-        onClick={() =>
-          onAdvance(order, isOutForDelivery ? "delivered" : "out_for_delivery")
-        }
-      >
-        {isOutForDelivery ? "Mark delivered" : "Mark picked up"}
-      </Button>
+      {isClaimed ? (
+        <Button
+          className="w-full bg-green-600 hover:bg-green-700 text-white cursor-pointer font-semibold text-xs h-9"
+          disabled={busy}
+          onClick={() =>
+            onAdvance(order, isOutForDelivery ? "delivered" : "out_for_delivery")
+          }
+        >
+          {isOutForDelivery ? "Mark delivered" : "Mark picked up"}
+        </Button>
+      ) : (
+        <Button
+          className="w-full bg-primary hover:bg-primary/90 cursor-pointer font-semibold text-xs h-9"
+          disabled={busy}
+          onClick={() => onClaim && onClaim(order)}
+        >
+          Claim Delivery
+        </Button>
+      )}
     </Card>
   );
 }
@@ -342,11 +410,11 @@ function ProfileTab() {
               {loading || !stats?.orders?.length
                 ? "—"
                 : `${Math.round(
-                    stats.orders.reduce(
-                      (sum, o) => sum + (o.pickup_to_delivered_minutes ?? 0),
-                      0
-                    ) / stats.orders.length
-                  )}m`}
+                  stats.orders.reduce(
+                    (sum, o) => sum + (o.pickup_to_delivered_minutes ?? 0),
+                    0
+                  ) / stats.orders.length
+                )}m`}
             </p>
             <p className="text-xs text-muted-foreground">Avg pickup → delivered</p>
           </div>

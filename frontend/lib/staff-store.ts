@@ -22,20 +22,21 @@ import {
  * All money is server-priced via /api/cart/price; nothing is computed here.
  */
 
-export const MAX_TOPPINGS = 3;
+export const MAX_TOPPINGS = Number.POSITIVE_INFINITY;
 
-/** POS flow, modelled on the graded Gradio app: details → build → pay → done. */
+/** POS flow: details -> build -> pay -> done. */
 export type PosStep = "details" | "build" | "payment" | "done";
 
 /** How the walk-in is being served — staff-only, frontend-only (not sent to
  *  the API; core/ and the DB schema are untouched). Dine In is the default. */
 export type OrderType = "dine_in" | "takeaway";
 
-/** One committed pizza on the ticket (base + pizza + toppings + qty). */
+/** One committed item on the ticket (generic item + size + crust + toppings + qty). */
 export interface TicketLine {
   id: string;
-  pizza: MenuItem;
-  base: MenuItem;
+  item: MenuItem;
+  size_code: string | null;
+  crust: MenuItem | null;
   toppings: MenuItem[];
   quantity: number;
 }
@@ -48,8 +49,10 @@ function newId() {
 
 export function toPayload(line: TicketLine): CartLinePayload {
   return {
-    base_id: line.base.id,
-    pizza_id: line.pizza.id,
+    item_id: line.item.id,
+    item_type: line.item.item_type || "generic",
+    size_code: line.size_code,
+    crust_id: line.crust?.id ?? null,
     topping_ids: line.toppings.map((t) => t.id),
     quantity: line.quantity,
   };
@@ -60,7 +63,7 @@ interface StaffPosState {
   step: PosStep;
   setStep: (step: PosStep) => void;
 
-  // Customer details (Gradio "details" step — validated by the components
+  // Customer details, validated by the components and core rules.
   // with the same core rules; re-validated server-side at checkout).
   customerName: string;
   customerPhone: string;

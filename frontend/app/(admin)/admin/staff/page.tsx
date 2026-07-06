@@ -31,6 +31,7 @@ const emptyStaff = {
   phone: "",
   role_name: "Customer Facing Staff",
   employee_code: "",
+  pin: "",
 };
 
 export default function AdminStaffPage() {
@@ -120,7 +121,7 @@ export default function AdminStaffPage() {
           <UserPlus className="size-5 text-primary" />
           <h2 className="font-heading text-lg font-semibold">Create Staff</h2>
         </div>
-        <div className="grid gap-3 md:grid-cols-[1fr_1fr_150px_190px_130px_auto]">
+        <div className="grid gap-3 md:grid-cols-[1fr_1fr_120px_160px_100px_110px_auto]">
           <Input
             placeholder="Full name"
             value={draft.full_name}
@@ -147,6 +148,13 @@ export default function AdminStaffPage() {
             onChange={(event) =>
               setDraft({ ...draft, employee_code: event.target.value })
             }
+          />
+          <Input
+            placeholder="PIN"
+            type="password"
+            maxLength={6}
+            value={draft.pin}
+            onChange={(event) => setDraft({ ...draft, pin: event.target.value })}
           />
           <Button disabled={saving === "new"} onClick={() => void create()}>
             <UserPlus />

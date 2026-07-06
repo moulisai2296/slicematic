@@ -14,8 +14,7 @@ const ORDER_TYPES = [
 ] as const satisfies readonly { id: OrderType; label: string; icon: typeof UtensilsCrossed }[];
 
 /**
- * POS step 1 — walk-in customer details. Same logic as the graded Gradio
- * app's details step: validate name (letters/spaces, 2–40) and phone
+ * POS step 1 - walk-in customer details. Validates name (letters/spaces, 2-40) and phone
  * (10 digits starting 6–9) on Next, list every error, advance only when both
  * pass. The API re-validates via core/validation.py at checkout.
  *
@@ -34,7 +33,7 @@ export function CustomerDetails() {
     e.preventDefault();
     const cleanName = name.trim();
     const cleanPhone = phone.trim();
-    // Mirror core/validation.py — same rules the Gradio details step applies.
+    // Mirror core/validation.py so staff orders use the same customer rules.
     const errs: string[] = [];
     if (!/^[A-Za-z ]{2,40}$/.test(cleanName)) {
       errs.push("Name must be 2–40 characters, letters and spaces only.");

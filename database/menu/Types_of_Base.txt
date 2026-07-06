@@ -1,6 +1,0 @@
-B1;Thin Crust;149.00
-B2;Thick Crust;179.00
-B3;Cheese Burst;229.00
-B5;Multigrain;169.00
-B6;Multigrain2;169.00
-B8;Multigrain4;169.00

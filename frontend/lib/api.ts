@@ -7,8 +7,10 @@
  * client never computes prices.
  */
 
-const API_BASE =
+export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") ?? "http://localhost:7861";
+
+export const WS_BASE = API_BASE.replace(/^http/, "ws");
 
 export class ApiError extends Error {
   constructor(
@@ -202,14 +204,24 @@ export function sendChat(
 
 export interface MenuItem {
   id: string;
+  category_code: string;
   name: string;
   price: number;
+  item_type: string | null;
+  description: string | null;
+  image_url: string | null;
+  sizes: { size_code: string; price: number }[];
+}
+
+export interface MenuSize {
+  id: string;
+  code: string;
+  name: string;
 }
 
 export interface Menu {
-  bases: MenuItem[];
-  pizzas: MenuItem[];
-  toppings: MenuItem[];
+  categories: Record<string, MenuItem[]>;
+  sizes: MenuSize[];
   error?: string;
 }
 
@@ -228,12 +240,14 @@ export function getConfig(): Promise<PricingConfig> {
 }
 
 /* ------------------------- Cart pricing --------------------- */
-// Multi-line, multi-topping (1..3) pricing. All money is computed server-side
+// Multi-line, multi-topping pricing. All money is computed server-side
 // by core/ — the client only sends ids + quantities and renders the result.
 
 export interface CartLinePayload {
-  base_id: string;
-  pizza_id: string;
+  item_id: string;
+  item_type: string;
+  size_code: string | null;
+  crust_id: string | null;
   topping_ids: string[];
   quantity: number;
 }
@@ -245,8 +259,10 @@ export interface PricedComponent {
 }
 
 export interface PricedLine {
-  base: PricedComponent;
-  pizza: PricedComponent;
+  item: PricedComponent;
+  item_type: string;
+  size_code: string | null;
+  crust: PricedComponent | null;
   toppings: PricedComponent[];
   quantity: number;
   unit_price: number;
@@ -298,6 +314,7 @@ export interface CheckoutPayload {
   /** Order channel — server default "online" if omitted. */
   type?: OrderChannel;
   lines: CartLinePayload[];
+  coupon_code?: string;
 }
 
 export interface CheckoutResponse {
@@ -317,19 +334,115 @@ export function checkoutCart(
   return postJSON<CheckoutResponse>("/api/cart/checkout", payload);
 }
 
+/* --------------------------- Coupons ----------------------- */
+
+export interface CouponRule {
+  id: string;
+  name: string;
+  coupon_code: string;
+  description?: string | null;
+  discount_percent: number;
+  threshold_amount: number;
+  start_date?: string | null;
+  end_date?: string | null;
+}
+
+export interface CouponsResponse {
+  ok: boolean;
+  coupons: CouponRule[];
+  errors?: Record<string, string>;
+}
+
+export interface CouponValidateResponse {
+  ok: boolean;
+  coupon_code?: string;
+  coupon_name?: string;
+  description?: string | null;
+  discount_percent?: number;
+  discount_amount?: number;
+  original_total?: number;
+  new_total?: number;
+  savings?: number;
+  errors?: Record<string, string>;
+}
+
+export function listAvailableCoupons(): Promise<CouponsResponse> {
+  return getJSON<CouponsResponse>("/api/coupons/available");
+}
+
+export function validateCoupon(
+  code: string,
+  cartTotal: number
+): Promise<CouponValidateResponse> {
+  return postJSON<CouponValidateResponse>("/api/coupons/validate", {
+    code,
+    cart_total: cartTotal,
+  });
+}
+
+export function acceptOrder(
+  orderNo: string,
+  token: string
+): Promise<{ ok: boolean; order?: UserOrder; errors?: Record<string, string> }> {
+  return postJSON(`/api/orders/${orderNo}/accept`, {}, authHeader(token));
+}
+
+/* --------------------------- Feedback ---------------------- */
+
+export interface FeedbackStatusResponse {
+  ok: boolean;
+  has_feedback?: boolean;
+  rating?: number;
+  feedback_text?: string;
+  created_at?: string;
+  errors?: Record<string, string>;
+}
+
+export interface SubmitFeedbackResponse {
+  ok: boolean;
+  already_submitted?: boolean;
+  feedback_id?: string;
+  rating?: number;
+  message?: string;
+  errors?: Record<string, string>;
+}
+
+export function getOrderFeedback(
+  orderNo: string
+): Promise<FeedbackStatusResponse> {
+  return getJSON<FeedbackStatusResponse>(`/api/orders/${encodeURIComponent(orderNo)}/feedback`);
+}
+
+export function submitOrderFeedback(
+  orderNo: string,
+  rating: number,
+  feedbackText: string
+): Promise<SubmitFeedbackResponse> {
+  return postJSON<SubmitFeedbackResponse>(
+    `/api/orders/${encodeURIComponent(orderNo)}/feedback`,
+    { rating, feedback_text: feedbackText }
+  );
+}
+
 /* ------------------------- Orders (DB) ---------------------- */
 // API orders live in Supabase (source of truth). Listed by user_id.
 
 export interface OrderItem {
-  pizza: string;
-  base: string;
+  item_name: string;
+  item_type: string | null;
+  size_code: string | null;
+  crust: string | null;
   toppings: string[];
   quantity: number;
   unit_price: number;
   line_total: number;
+  base_price?: number;
+  crust_price?: number;
+  toppings_breakdown?: { name: string; price: number }[];
 }
 
 export interface UserOrder {
+  id?: string;
   order_no: string;
   items: OrderItem[] | null;
   subtotal: number;
@@ -343,7 +456,9 @@ export interface UserOrder {
   customer_phone?: string;
   delivery_address?: string | null;
   source?: string;
+  /** Canonical order channel. */
   type?: OrderChannel | null;
+  rider_id?: string | null;
   preparing_at?: string | null;
   ready_at?: string | null;
   out_for_delivery_at?: string | null;

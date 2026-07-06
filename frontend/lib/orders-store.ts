@@ -23,7 +23,7 @@ export const DELIVERY_STEPS = [
   "Delivered",
 ] as const;
 
-export const PICKUP_STEPS = ["Received", "Preparing", "Ready for pickup"] as const;
+export const PICKUP_STEPS = ["Received", "Preparing", "Ready for pickup", "Delivered"] as const;
 
 export type OrderStep = (typeof DELIVERY_STEPS)[number];
 

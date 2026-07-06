@@ -15,6 +15,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { getRecentOrders, type UserOrder } from "@/lib/api";
 import { orderStatus } from "@/lib/orders-store";
+import { advanceStaffOrder } from "@/lib/staff-api";
+import { useRealtime } from "@/lib/useRealtime";
 import { cn, formatINR } from "@/lib/utils";
 
 /**
@@ -75,9 +77,9 @@ export function RecentOrders() {
 
   useEffect(() => {
     void load();
-    const t = setInterval(() => void load(), 20000);
-    return () => clearInterval(t);
   }, [load]);
+
+  useRealtime(["order_created", "order_status_updated"], load, load);
 
   useEffect(() => {
     if (!statusMenuOpen) return;
@@ -239,7 +241,7 @@ export function RecentOrders() {
           <ul className="space-y-3 pb-2">
             {visible.map((o) => (
               <li key={o.order_no}>
-                <StaffOrderCard order={o} />
+                <StaffOrderCard order={o} onRefresh={load} />
               </li>
             ))}
           </ul>
@@ -249,7 +251,7 @@ export function RecentOrders() {
   );
 }
 
-function StaffOrderCard({ order }: { order: UserOrder }) {
+function StaffOrderCard({ order, onRefresh }: { order: UserOrder; onRefresh?: () => void }) {
   const placedMs = Date.parse(order.created_at);
   const { index } = orderStatus(order);
   const placedTime = Number.isNaN(placedMs)
@@ -329,11 +331,35 @@ function StaffOrderCard({ order }: { order: UserOrder }) {
         {items.map((item, i) => (
           <div key={i} className="flex justify-between gap-2 text-xs">
             <span className="min-w-0 truncate text-muted-foreground">
-              {item.quantity}× {item.pizza}
+              {item.quantity}× {item.item_name}
             </span>
           </div>
         ))}
       </div>
+
+      {/* Action Button: Mark Served */}
+      {order.status === "ready_for_pickup" && (
+        <div className="border-t border-border p-2 bg-surface-2/20">
+          <button
+            type="button"
+            onClick={async (e) => {
+              e.stopPropagation();
+              try {
+                await advanceStaffOrder(order.id!);
+                if (onRefresh) {
+                  onRefresh();
+                }
+              } catch (err) {
+                alert(err instanceof Error ? err.message : "Failed to serve order");
+              }
+            }}
+            className="flex items-center justify-center gap-1.5 w-full h-8 cursor-pointer rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-colors shadow-sm"
+          >
+            <Check className="size-3.5" />
+            Mark Served
+          </button>
+        </div>
+      )}
     </Card>
   );
 }

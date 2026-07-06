@@ -73,6 +73,7 @@ export interface AdminMenuItem {
   name: string;
   price: number;
   is_available: boolean;
+  image_url?: string;
   updated_at: string;
 }
 
@@ -652,6 +653,7 @@ export async function updateAdminOrderStatus(
 
 export async function updateAdminMenuItem(
   item: Pick<AdminMenuItem, "id" | "name" | "price" | "is_available"> & {
+    image_url?: string | null;
     reason?: string;
   }
 ): Promise<{ ok: boolean; item: AdminMenuItem }> {
@@ -659,6 +661,7 @@ export async function updateAdminMenuItem(
     name: item.name,
     price: item.price,
     is_available: item.is_available,
+    image_url: item.image_url,
     reason: item.reason,
   });
 }
@@ -768,6 +771,12 @@ export async function updateAdminStaff(
   }
 ): Promise<{ ok: boolean; staff: AdminStaffMember }> {
   return adminJSON(`/admin/staff/${staffId}`, "PUT", payload);
+}
+
+export async function deleteAdminStaff(
+  staffId: string
+): Promise<{ ok: boolean; staff: AdminStaffMember }> {
+  return adminJSON(`/admin/staff/${staffId}`, "DELETE", {});
 }
 
 export async function getAdminPayments(): Promise<{
@@ -1029,6 +1038,29 @@ export async function updateAdminSettings(
   reason?: string
 ): Promise<{ ok: boolean; settings: AdminSetting[] }> {
   return adminJSON("/admin/settings", "PUT", { values, reason });
+}
+
+export async function uploadAdminMenuItemPhoto(
+  _itemId: string,
+  file: File
+): Promise<{ ok: boolean; image_url: string; error?: string }> {
+  if (!ADMIN_TOKEN) {
+    throw new Error("Admin dev token is missing in frontend/.env.local.");
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch(`${API_BASE}/api/admin/menu/upload`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${ADMIN_TOKEN}` },
+    body: formData,
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(body?.detail ?? `Admin upload failed (${res.status}).`);
+  }
+  return body as { ok: boolean; image_url: string; error?: string };
 }
 
 async function adminGet<T>(path: string): Promise<T> {

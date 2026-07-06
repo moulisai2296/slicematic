@@ -110,19 +110,21 @@ export function OrderTicket() {
                   className="rounded-xl border border-border bg-surface-2 p-3.5"
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="font-medium text-foreground">
-                        {line.pizza.name}
+                        {line.item.name} {line.size_code && `(${line.size_code})`}
                       </p>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        {line.base.name} ·{" "}
-                        {line.toppings.map((t) => t.name).join(", ")}
+                        {line.crust?.name ? `${line.crust.name}` : ""}
+                        {line.crust && line.toppings.length > 0 ? " · " : ""}
+                        {line.toppings.length > 0 ? line.toppings.map((t) => t.name).join(", ") : ""}
+                        {!line.crust && line.toppings.length === 0 && line.item.category_code !== 'pizza' ? line.item.item_type || '' : ""}
                       </p>
                     </div>
                     {!inPayment && (
                       <button
                         type="button"
-                        aria-label={`Remove ${line.pizza.name}`}
+                        aria-label={`Remove ${line.item.name}`}
                         onClick={() => removeLine(line.id)}
                         className="grid size-9 shrink-0 cursor-pointer place-items-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive [&_svg]:size-4"
                       >

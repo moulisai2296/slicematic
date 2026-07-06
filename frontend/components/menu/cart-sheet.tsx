@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useMenuStore } from "@/lib/menu-store";
-import { formatINR } from "@/lib/utils";
+import { formatINR, roundFinalAmount } from "@/lib/utils";
 
 import { QuantityStepper } from "./quantity-stepper";
 
@@ -24,12 +24,12 @@ export function CartSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         title="Your order"
-        description={`${cart.length} ${cart.length === 1 ? "pizza" : "pizzas"} in your order`}
+        description={`${cart.length} ${cart.length === 1 ? "item" : "items"} in your order`}
       >
         <div className="slick-scroll flex-1 overflow-y-auto px-5 py-4">
           {cart.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">
-              Your order is empty. Add a pizza to get started.
+              Your order is empty. Add items from the menu to get started.
             </p>
           ) : (
             <ul className="space-y-3">
@@ -41,17 +41,20 @@ export function CartSheet({
                     className="rounded-xl border border-border bg-surface-2 p-3.5"
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <p className="font-medium text-foreground">
-                          {line.pizza.name}
+                          {line.item.name} {line.size_code && `(${line.size_code})`}
                         </p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
-                          {line.base.name} · {line.toppings.map((t) => t.name).join(", ")}
+                          {line.crust?.name ? `${line.crust.name}` : ""}
+                          {line.crust && line.toppings.length > 0 ? " · " : ""}
+                          {line.toppings.length > 0 ? line.toppings.map((t) => t.name).join(", ") : ""}
+                          {!line.crust && line.toppings.length === 0 && line.item.category_code !== 'pizza' ? line.item.item_type || '' : ""}
                         </p>
                       </div>
                       <button
                         type="button"
-                        aria-label={`Remove ${line.pizza.name}`}
+                        aria-label={`Remove ${line.item.name}`}
                         onClick={() => removeLine(line.id)}
                         className="grid size-8 shrink-0 cursor-pointer place-items-center rounded-full text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive [&_svg]:size-4"
                       >
@@ -90,7 +93,7 @@ export function CartSheet({
               <div className="flex items-center justify-between border-t border-border pt-2 text-base font-bold">
                 <dt>Total</dt>
                 <dd className="tabular-nums">
-                  {totals ? formatINR(totals.total) : pricing ? "…" : "—"}
+                  {totals ? formatINR(roundFinalAmount(totals.total)) : pricing ? "…" : "—"}
                 </dd>
               </div>
             </dl>

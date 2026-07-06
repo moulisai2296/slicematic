@@ -1,5 +1,3 @@
-"""FastAPI surface over core/. Shared by the Gradio app and the HTML frontend."""
+﻿"""FastAPI surface over core/. Shared by the Stage 3 backend and frontend."""
 
 from api.routes import router
-
-__all__ = ["router"]

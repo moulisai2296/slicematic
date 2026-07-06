@@ -9,6 +9,14 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(__dirname),
   // Hide the floating dev-tools "N" indicator (bottom-left) for clean demos.
   devIndicators: false,
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "hadsgawgroliejibuvxh.supabase.co",
+      },
+    ],
+  },
 };
 
 export default nextConfig;
