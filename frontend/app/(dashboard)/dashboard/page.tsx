@@ -58,7 +58,7 @@ const DAYS_OPTIONS = [7, 30, 90] as const;
  */
 export default function DashboardPage() {
   const token = useAuthStore((s) => s.token);
-  const [activeTab, setActiveTab] = useState<"observability" | "evaluation" | "escalations">("observability");
+  const [activeTab, setActiveTab] = useState<"observability" | "evaluation" | "escalations">("escalations");
   const [days, setDays] = useState<(typeof DAYS_OPTIONS)[number]>(7);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -152,17 +152,17 @@ export default function DashboardPage() {
     void loadRows();
   }, [loadRows]);
 
+  // All tabs load eagerly on mount (not on first visit) so switching tabs is
+  // instant — the slow Langfuse-backed calls warm up in the background while
+  // the fast escalations tab is on screen. The backend coalesces the
+  // concurrent trace fetches, so this doesn't duplicate outbound load.
   useEffect(() => {
-    if (activeTab === "evaluation") {
-      void loadScores();
-    }
-  }, [activeTab, loadScores]);
+    void loadScores();
+  }, [loadScores]);
 
   useEffect(() => {
-    if (activeTab === "escalations") {
-      void loadEscalations();
-    }
-  }, [activeTab, loadEscalations]);
+    void loadEscalations();
+  }, [loadEscalations]);
 
   if (selectedSession) {
     return (
@@ -209,7 +209,7 @@ export default function DashboardPage() {
 
       {/* Tabs list */}
       <div className="flex border-b border-border gap-1">
-        {(["observability", "evaluation", "escalations"] as const).map((tab) => (
+        {(["escalations", "observability", "evaluation"] as const).map((tab) => (
           <button
             key={tab}
             type="button"
@@ -643,6 +643,55 @@ function SessionDetailView({
 }
 
 
+/** Friendly names for the auto-scores written by ai/observability.py. */
+const SCORE_LABELS: Record<string, string> = {
+  model_used: "Model answered",
+  guardrail_category: "Guardrail check",
+  order_placed: "Order placed",
+  escalated: "Escalated to human",
+  stt_failed: "Speech-to-text",
+  tts_failed: "Text-to-speech",
+  tool_error: "Tool execution",
+  tts_latency_seconds: "TTS latency",
+};
+
+/** Render one raw score as a human-readable badge. Categorical scores carry
+ *  their real label in string_value — the numeric value is only Langfuse's
+ *  category index (model_used "0" just means "first model name seen"). */
+function scoreDisplay(s: DashboardScore): {
+  text: string;
+  variant: "success" | "destructive" | "primary" | "default";
+} {
+  switch (s.name) {
+    case "model_used": {
+      const label = s.string_value || `model #${s.value}`;
+      return { text: label.split("/").pop() || label, variant: "primary" };
+    }
+    case "guardrail_category": {
+      const safe = !s.string_value || s.string_value === "SAFE";
+      return { text: s.string_value || "SAFE", variant: safe ? "default" : "destructive" };
+    }
+    case "order_placed":
+      return s.value === 1
+        ? { text: "✓ placed", variant: "success" }
+        : { text: "not placed", variant: "default" };
+    case "escalated":
+      return s.value === 1
+        ? { text: "⚠ yes", variant: "destructive" }
+        : { text: "no", variant: "default" };
+    case "stt_failed":
+    case "tts_failed":
+    case "tool_error":
+      return s.value === 1
+        ? { text: "failed", variant: "destructive" }
+        : { text: "ok", variant: "success" };
+    case "tts_latency_seconds":
+      return { text: `${s.value.toFixed(1)}s`, variant: s.value > 5 ? "destructive" : "default" };
+    default:
+      return { text: s.string_value ?? String(s.value), variant: "default" };
+  }
+}
+
 function EvaluationView({
   scores,
   loading,
@@ -694,34 +743,57 @@ function EvaluationView({
     );
   }
 
-  // Calculate aggregate metrics from scores
-  const uniqueSessions = new Set(scores.map((s) => s.session_id).filter(Boolean));
+  // ---- interpret the raw auto-scores (written by ai/observability.py) ----
+  // "warmup" is the service pinging itself at startup, not a customer chat.
+  const real = scores.filter((s) => s.session_id !== "warmup");
+  const uniqueSessions = new Set(real.map((s) => s.session_id).filter(Boolean));
 
-  // Guardrail category scores
-  const guardrailScores = scores.filter((s) => s.name === "guardrail_category");
-  const guardrailViolations = guardrailScores.filter((s) => s.value === 1.0).length;
-  const guardrailRate = guardrailScores.length > 0 ? (guardrailViolations / guardrailScores.length) * 100 : 0;
+  // Conversion: order_placed is only ever written when an order is saved.
+  const ordersPlaced = real.filter((s) => s.name === "order_placed" && s.value === 1);
+  const conversionRate = uniqueSessions.size > 0 ? (ordersPlaced.length / uniqueSessions.size) * 100 : 0;
 
-  // Order completed scores
-  const orderCompletedScores = scores.filter((s) => s.name === "order_completed");
-  const orderCompletedCount = orderCompletedScores.filter((s) => s.value === 1.0).length;
-  const successRate = orderCompletedScores.length > 0 ? (orderCompletedCount / orderCompletedScores.length) * 100 : 0;
-
-  // Escalated scores
-  const escalatedScores = scores.filter((s) => s.name === "escalated");
-  const escalatedCount = escalatedScores.filter((s) => s.value === 1.0).length;
+  // Escalations: sessions that asked for a human.
+  const escalatedCount = real.filter((s) => s.name === "escalated" && s.value === 1).length;
   const escalationRate = uniqueSessions.size > 0 ? (escalatedCount / uniqueSessions.size) * 100 : 0;
 
-  // Group scores by session_id
+  // Guardrails: every screened message logs its category; anything not SAFE
+  // was blocked (injection / abuse / off-topic).
+  const guardrailScores = real.filter((s) => s.name === "guardrail_category");
+  const guardrailFlags = guardrailScores.filter((s) => s.string_value && s.string_value !== "SAFE");
+  const guardrailRate = guardrailScores.length > 0 ? (guardrailFlags.length / guardrailScores.length) * 100 : 0;
+
+  // Model mix: one model_used per successful LLM turn. More than one distinct
+  // model in the window means the fallback chain fired.
+  const modelCounts = new Map<string, number>();
+  real.filter((s) => s.name === "model_used").forEach((s) => {
+    const label = (s.string_value || `model #${s.value}`).split("/").pop() || "unknown";
+    modelCounts.set(label, (modelCounts.get(label) || 0) + 1);
+  });
+  const modelMix = Array.from(modelCounts.entries()).sort((a, b) => b[1] - a[1]);
+  const fallbackTurns = modelMix.slice(1).reduce((acc, [, n]) => acc + n, 0);
+
+  // Voice + tool health.
+  const sttFails = real.filter((s) => s.name === "stt_failed" && s.value === 1).length;
+  const ttsFails = real.filter((s) => s.name === "tts_failed" && s.value === 1).length;
+  const toolErrors = real.filter((s) => s.name === "tool_error" && s.value === 1).length;
+  const ttsLatencies = real.filter((s) => s.name === "tts_latency_seconds").map((s) => s.value);
+  const avgTtsLatency = ttsLatencies.length
+    ? ttsLatencies.reduce((a, b) => a + b, 0) / ttsLatencies.length
+    : null;
+
+  // Group scores by session_id → one row per conversation with its outcome.
   interface GroupedSession {
     session_id: string;
     latest_timestamp: string | null;
-    avg_score: number;
+    ordered: boolean;
+    escalated: boolean;
+    flags: number;
+    models: string[];
     scores: DashboardScore[];
   }
 
   const groupedMap = new Map<string, DashboardScore[]>();
-  scores.forEach((s) => {
+  real.forEach((s) => {
     if (s.session_id) {
       const arr = groupedMap.get(s.session_id) || [];
       arr.push(s);
@@ -730,9 +802,6 @@ function EvaluationView({
   });
 
   const groupedSessions: GroupedSession[] = Array.from(groupedMap.entries()).map(([session_id, sessionScores]) => {
-    const sum = sessionScores.reduce((acc, curr) => acc + (curr.value ?? 0), 0);
-    const avg = sessionScores.length > 0 ? sum / sessionScores.length : 0;
-    
     let latest: string | null = null;
     sessionScores.forEach((s) => {
       if (s.timestamp) {
@@ -745,10 +814,26 @@ function EvaluationView({
     return {
       session_id,
       latest_timestamp: latest,
-      avg_score: avg,
+      ordered: sessionScores.some((s) => s.name === "order_placed" && s.value === 1),
+      escalated: sessionScores.some((s) => s.name === "escalated" && s.value === 1),
+      flags: sessionScores.filter(
+        (s) => s.name === "guardrail_category" && s.string_value && s.string_value !== "SAFE"
+      ).length,
+      models: Array.from(
+        new Set(
+          sessionScores
+            .filter((s) => s.name === "model_used")
+            .map((s) => (s.string_value || "").split("/").pop() || "")
+            .filter(Boolean)
+        )
+      ),
       scores: sessionScores,
     };
   });
+
+  groupedSessions.sort((a, b) =>
+    (b.latest_timestamp || "").localeCompare(a.latest_timestamp || "")
+  );
 
   const filteredGrouped = groupedSessions.filter((g) =>
     g.session_id.toLowerCase().includes(filter.toLowerCase())
@@ -758,29 +843,75 @@ function EvaluationView({
 
   return (
     <div className="space-y-6">
-      {/* Aggregate Cards */}
+      {/* The four questions every conversation auto-answers */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="space-y-1 p-4">
-          <p className="text-xs text-muted-foreground">Total Evaluated Sessions</p>
+          <p className="text-xs text-muted-foreground">Conversations Evaluated</p>
           <p className="font-heading text-2xl font-bold">{uniqueSessions.size}</p>
-          <p className="text-xs text-muted-foreground">{scores.length} scores logged</p>
+          <p className="text-xs text-muted-foreground">{real.length} auto-scores logged</p>
         </Card>
         <Card className="space-y-1 p-4">
-          <p className="text-xs text-muted-foreground">Order Success Rate</p>
-          <p className="font-heading text-2xl font-bold text-emerald-500">{successRate.toFixed(1)}%</p>
-          <p className="text-xs text-muted-foreground">{orderCompletedCount} / {orderCompletedScores.length} orders completed</p>
+          <p className="text-xs text-muted-foreground">Did it convert? — Orders Placed</p>
+          <p className="font-heading text-2xl font-bold text-emerald-500">{ordersPlaced.length}</p>
+          <p className="text-xs text-muted-foreground">{conversionRate.toFixed(0)}% of conversations ended in a saved order</p>
         </Card>
         <Card className="space-y-1 p-4">
-          <p className="text-xs text-muted-foreground">Human Escalation Rate</p>
-          <p className="font-heading text-2xl font-bold text-amber-500">{escalationRate.toFixed(1)}%</p>
-          <p className="text-xs text-muted-foreground">{escalatedCount} sessions escalated</p>
+          <p className="text-xs text-muted-foreground">Did it need a human? — Escalations</p>
+          <p className="font-heading text-2xl font-bold text-amber-500">{escalatedCount}</p>
+          <p className="text-xs text-muted-foreground">{escalationRate.toFixed(0)}% of conversations handed off</p>
         </Card>
         <Card className="space-y-1 p-4">
-          <p className="text-xs text-muted-foreground">Guardrail Violation Rate</p>
-          <p className="font-heading text-2xl font-bold text-rose-500">{guardrailRate.toFixed(1)}%</p>
-          <p className="text-xs text-muted-foreground">{guardrailViolations} / {guardrailScores.length} violations flagged</p>
+          <p className="text-xs text-muted-foreground">Did it stay safe? — Guardrail Flags</p>
+          <p className="font-heading text-2xl font-bold text-rose-500">{guardrailFlags.length}</p>
+          <p className="text-xs text-muted-foreground">
+            {guardrailRate.toFixed(1)}% of {guardrailScores.length} screened messages blocked
+          </p>
         </Card>
       </div>
+
+      {/* Did the AI stack hold up? */}
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Card className="space-y-2 p-4">
+          <p className="text-xs text-muted-foreground">Model Mix (fallback chain)</p>
+          <div className="flex flex-wrap gap-1.5">
+            {modelMix.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No LLM turns in this window.</p>
+            ) : (
+              modelMix.map(([model, n]) => (
+                <Badge key={model} variant="primary" className="text-[10px]">
+                  {model} × {n}
+                </Badge>
+              ))
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {fallbackTurns > 0
+              ? `${fallbackTurns} turn${fallbackTurns === 1 ? "" : "s"} answered by a fallback model`
+              : "Primary model answered every turn"}
+          </p>
+        </Card>
+        <Card className="space-y-1 p-4">
+          <p className="text-xs text-muted-foreground">Voice Pipeline</p>
+          <p className="font-heading text-2xl font-bold">
+            {sttFails + ttsFails === 0 ? "Healthy" : `${sttFails + ttsFails} failures`}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {sttFails} STT · {ttsFails} TTS failures
+            {avgTtsLatency !== null ? ` · avg TTS ${avgTtsLatency.toFixed(1)}s` : ""}
+          </p>
+        </Card>
+        <Card className="space-y-1 p-4">
+          <p className="text-xs text-muted-foreground">Tool Errors</p>
+          <p className="font-heading text-2xl font-bold">{toolErrors}</p>
+          <p className="text-xs text-muted-foreground">failed tool executions (pricing, saving, menu)</p>
+        </Card>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Every conversation scores itself automatically — no human grading: did it convert
+        (order_placed), did it stay safe (guardrail_category), did it need a human (escalated),
+        and did the stack hold up (model_used, voice, tools). Click a session to see its raw scores.
+      </p>
 
       {/* Main Grid */}
       <div className="grid gap-6 lg:grid-cols-3">
@@ -809,8 +940,8 @@ function EvaluationView({
                     <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
                       <th className="px-4 py-3 font-semibold">Latest Activity</th>
                       <th className="px-4 py-3 font-semibold">Session ID</th>
-                      <th className="px-4 py-3 font-semibold">Avg Score</th>
-                      <th className="px-4 py-3 font-semibold">Logged Metrics</th>
+                      <th className="px-4 py-3 font-semibold">Outcome</th>
+                      <th className="px-4 py-3 font-semibold">Model(s)</th>
                       <th className="px-4 py-3 font-semibold">Actions</th>
                     </tr>
                   </thead>
@@ -836,18 +967,27 @@ function EvaluationView({
                           </button>
                         </td>
                         <td className="px-4 py-3">
-                          <Badge variant={g.avg_score >= 0.8 ? "success" : g.avg_score >= 0.4 ? "default" : "destructive"}>
-                            {g.avg_score.toFixed(2)}
-                          </Badge>
+                          <div className="flex flex-wrap gap-1">
+                            {g.ordered && <Badge variant="success">✓ Ordered</Badge>}
+                            {g.escalated && <Badge variant="destructive">⚠ Escalated</Badge>}
+                            {g.flags > 0 && (
+                              <Badge variant="destructive">
+                                {g.flags} flagged message{g.flags === 1 ? "" : "s"}
+                              </Badge>
+                            )}
+                            {!g.ordered && !g.escalated && g.flags === 0 && (
+                              <Badge variant="default">No order</Badge>
+                            )}
+                          </div>
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap gap-1">
-                            {Array.from(new Set(g.scores.map((s) => s.name))).map((name, idx) => (
+                            {g.models.map((model) => (
                               <span
-                                key={idx}
+                                key={model}
                                 className="rounded bg-surface px-1.5 py-0.5 text-[10px] text-muted-foreground border border-border"
                               >
-                                {name}
+                                {model}
                               </span>
                             ))}
                           </div>
@@ -892,11 +1032,16 @@ function EvaluationView({
                 <p className="text-xs font-mono text-foreground break-all bg-surface-2 p-2 rounded border border-border select-all">
                   {selectedSessionId}
                 </p>
-                <div className="flex items-center gap-2 mt-2">
-                  <span className="text-xs text-muted-foreground">Session Avg Score:</span>
-                  <Badge variant={selectedSessionData.avg_score >= 0.8 ? "success" : selectedSessionData.avg_score >= 0.4 ? "default" : "destructive"}>
-                    {selectedSessionData.avg_score.toFixed(2)}
-                  </Badge>
+                <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                  <span className="text-xs text-muted-foreground">Outcome:</span>
+                  {selectedSessionData.ordered && <Badge variant="success">✓ Ordered</Badge>}
+                  {selectedSessionData.escalated && <Badge variant="destructive">⚠ Escalated</Badge>}
+                  {selectedSessionData.flags > 0 && (
+                    <Badge variant="destructive">{selectedSessionData.flags} flagged</Badge>
+                  )}
+                  {!selectedSessionData.ordered &&
+                    !selectedSessionData.escalated &&
+                    selectedSessionData.flags === 0 && <Badge variant="default">No order</Badge>}
                 </div>
               </div>
 
@@ -953,20 +1098,23 @@ function EvaluationView({
               <div className="space-y-3 border-t border-border pt-3">
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Scores Breakdown</h4>
                 <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                  {selectedSessionData.scores.map((s) => (
-                    <div key={s.id} className="rounded-lg bg-surface-2 p-2.5 text-xs space-y-1 border border-border">
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-foreground">{s.name}</span>
-                        <Badge variant={s.value === 1.0 && s.name === "guardrail_category" ? "destructive" : s.value === 1.0 ? "success" : "default"}>
-                          {s.value}
-                        </Badge>
+                  {selectedSessionData.scores.map((s) => {
+                    const d = scoreDisplay(s);
+                    return (
+                      <div key={s.id} className="rounded-lg bg-surface-2 p-2.5 text-xs space-y-1 border border-border">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-foreground">
+                            {SCORE_LABELS[s.name] ?? s.name}
+                          </span>
+                          <Badge variant={d.variant}>{d.text}</Badge>
+                        </div>
+                        {s.comment && <p className="text-muted-foreground italic mt-1 text-[11px] leading-relaxed">{s.comment}</p>}
+                        <p className="text-[10px] text-muted-foreground text-right mt-1 pt-1 border-t border-border/20">
+                          {s.timestamp ? new Date(s.timestamp).toLocaleString() : ""}
+                        </p>
                       </div>
-                      {s.comment && <p className="text-muted-foreground italic mt-1 text-[11px] leading-relaxed">{s.comment}</p>}
-                      <p className="text-[10px] text-muted-foreground text-right mt-1 pt-1 border-t border-border/20">
-                        {s.timestamp ? new Date(s.timestamp).toLocaleString() : ""}
-                      </p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 

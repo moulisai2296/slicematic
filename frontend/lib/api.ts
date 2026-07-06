@@ -740,6 +740,9 @@ export interface DashboardScore {
   id: string;
   name: string;
   value: number;
+  /** Real label of categorical scores (e.g. the model name, the guardrail
+   *  category) — `value` is only Langfuse's category index for those. */
+  string_value?: string | null;
   session_id?: string;
   trace_id?: string;
   comment?: string;

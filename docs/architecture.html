@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SliceMatic — Project Architecture</title>
+<style>
+  /* ------------------------------------------------------------------
+     SliceMatic architecture page — styled with the app's Midnight palette
+     (amber on near-black). Fully self-contained: no CDNs, no web fonts.
+     ------------------------------------------------------------------ */
+  :root {
+    --bg: #0c0a09;
+    --bg-2: #131110;
+    --card: #1c1917;
+    --card-2: #211d1b;
+    --line: #322c29;
+    --fg: #fafaf9;
+    --muted: #a8a29e;
+    --amber: #f59e0b;
+    --amber-dim: rgba(245, 158, 11, .12);
+    --orange: #f97316;
+    --green: #22c55e;
+    --blue: #60a5fa;
+    --purple: #c084fc;
+    --rose: #fb7185;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+  }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 32px; }
+
+  /* ---------- hero ---------- */
+  header {
+    padding: 72px 0 48px;
+    background:
+      radial-gradient(ellipse 900px 420px at 50% -80px, rgba(245,158,11,.14), transparent),
+      var(--bg);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand-mark {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-size: 13px; letter-spacing: .22em; text-transform: uppercase;
+    color: var(--amber); font-weight: 700;
+  }
+  .brand-mark::before { content: "🍕"; font-size: 18px; letter-spacing: 0; }
+  h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 800; margin: 14px 0 10px; letter-spacing: -.02em; }
+  h1 .accent { color: var(--amber); }
+  .tagline { color: var(--muted); font-size: 18px; max-width: 760px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
+  .stat {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 20px; min-width: 128px;
+  }
+  .stat b { display: block; font-size: 26px; color: var(--amber); font-weight: 800; }
+  .stat span { font-size: 12.5px; color: var(--muted); }
+
+  /* ---------- sections ---------- */
+  section { padding: 56px 0 8px; }
+  .kicker {
+    font-size: 12px; letter-spacing: .2em; text-transform: uppercase;
+    color: var(--amber); font-weight: 700; margin-bottom: 6px;
+  }
+  h2 { font-size: 30px; font-weight: 800; letter-spacing: -.01em; margin-bottom: 6px; }
+  .lede { color: var(--muted); max-width: 820px; margin-bottom: 28px; font-size: 15.5px; }
+
+  /* ---------- high-level flowchart ---------- */
+  .fc { display: flex; flex-direction: column; align-items: center; }
+  .fc-entries { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; width: 100%; max-width: 760px; }
+  .fc-node {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 18px; text-align: center;
+  }
+  .fc-node b { display: block; font-size: 15px; }
+  .fc-node small { color: var(--muted); font-size: 12px; display: block; margin-top: 3px; line-height: 1.45; }
+  .fc-node .tag {
+    display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    padding: 2px 9px; border-radius: 99px; margin-bottom: 7px;
+  }
+  .fc-node.cust { border-color: rgba(245,158,11,.55); background: linear-gradient(180deg, var(--amber-dim), var(--card)); }
+  .fc-node.sys  { border-color: rgba(192,132,252,.45); }
+  .fc-node.db   { border-color: rgba(251,113,133,.45); }
+  .fc-merge {
+    width: 380px; max-width: 50%; height: 22px;
+    border-left: 2px solid var(--line); border-right: 2px solid var(--line); border-bottom: 2px solid var(--line);
+    border-radius: 0 0 10px 10px;
+  }
+  .fc-drop { display: flex; flex-direction: column; align-items: center; }
+  .fc-drop .stem { width: 2px; height: 16px; background: var(--line); }
+  .fc-drop .head { color: var(--amber); font-size: 15px; line-height: .7; }
+  .fc-drop .lbl { color: var(--muted); font-size: 11.5px; margin: 3px 0 4px; font-style: italic; }
+  .fc-row3 {
+    display: grid; grid-template-columns: minmax(0,1fr) minmax(300px, 480px) minmax(0,1fr);
+    width: 100%; align-items: center;
+  }
+  .fc-row3 > .fc-node { grid-column: 2; }
+  .fc-side { grid-column: 3; display: flex; align-items: center; min-width: 0; }
+  .fc-side .dash { flex: none; width: 26px; height: 0; border-top: 2px dashed var(--line); }
+  .fc-side .fc-node { flex: 1; text-align: left; padding: 11px 14px; min-width: 0; }
+  .fc-side .fc-node b { font-size: 13px; }
+  .fc-side .fc-node small { font-size: 11.5px; }
+  .fc-spine { width: 100%; max-width: 480px; }
+  @media (max-width: 900px) {
+    .fc-row3 { grid-template-columns: 1fr; }
+    .fc-row3 > .fc-node { grid-column: 1; width: 100%; max-width: 480px; margin: 0 auto; }
+    .fc-side { grid-column: 1; justify-content: center; margin-top: 10px; }
+    .fc-side .fc-node { flex: none; max-width: 480px; }
+  }
+  @media (max-width: 640px) {
+    .fc-entries { grid-template-columns: 1fr; }
+    .fc-merge { display: none; }
+  }
+
+  /* ---------- architecture diagram ---------- */
+  .layer {
+    border: 1px solid var(--line); border-radius: 16px; background: var(--bg-2);
+    padding: 18px 20px 20px; margin-bottom: 0;
+  }
+  .layer-label {
+    display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px;
+  }
+  .layer-label .name { font-weight: 800; font-size: 15px; }
+  .layer-label .desc { color: var(--muted); font-size: 13px; }
+  .layer-label .dot { width: 9px; height: 9px; border-radius: 50%; align-self: center; flex: none; }
+  .boxes { display: grid; gap: 10px; }
+  .boxes.c6 { grid-template-columns: repeat(6, 1fr); }
+  .boxes.c5 { grid-template-columns: repeat(5, 1fr); }
+  .boxes.c4 { grid-template-columns: repeat(4, 1fr); }
+  .boxes.c3 { grid-template-columns: repeat(3, 1fr); }
+  .node {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 11px 13px; font-size: 13px;
+  }
+  .node b { display: block; font-size: 13.5px; margin-bottom: 2px; }
+  .node small { color: var(--muted); font-size: 11.5px; line-height: 1.45; display: block; }
+  .node.hl { border-color: rgba(245,158,11,.55); background: linear-gradient(180deg, var(--amber-dim), var(--card)); }
+  .node code { font-family: var(--mono); font-size: 11px; color: var(--amber); }
+  .flow-arrow {
+    text-align: center; color: var(--muted); font-size: 13px; padding: 8px 0;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+  }
+  .flow-arrow::before, .flow-arrow::after { content: ""; height: 1px; width: 60px; background: var(--line); }
+  .flow-arrow .arr { color: var(--amber); font-size: 16px; }
+
+  .core-banner {
+    border: 1.5px solid rgba(245,158,11,.6); border-radius: 16px;
+    background: linear-gradient(180deg, rgba(245,158,11,.10), rgba(245,158,11,.03));
+    padding: 18px 20px 20px;
+  }
+
+  /* ---------- screens ---------- */
+  .surfaces { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .surface {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px;
+    display: flex; flex-direction: column;
+  }
+  .surface .role {
+    display: inline-flex; align-self: flex-start; font-size: 11px; font-weight: 700; letter-spacing: .08em;
+    text-transform: uppercase; padding: 3px 10px; border-radius: 99px; margin-bottom: 10px;
+  }
+  .surface h3 { font-size: 17px; margin-bottom: 2px; }
+  .surface .idiom { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
+  .surface ul { list-style: none; }
+  .surface li {
+    font-size: 13px; padding: 6px 0 6px 18px; position: relative; border-top: 1px solid var(--line);
+  }
+  .surface li::before { content: "›"; position: absolute; left: 4px; color: var(--amber); font-weight: 700; }
+  .surface li b { font-weight: 650; }
+  .surface li span { color: var(--muted); }
+  .r-amber  { background: var(--amber-dim); color: var(--amber); }
+  .r-blue   { background: rgba(96,165,250,.12); color: var(--blue); }
+  .r-green  { background: rgba(34,197,94,.12); color: var(--green); }
+  .r-purple { background: rgba(192,132,252,.12); color: var(--purple); }
+  .r-rose   { background: rgba(251,113,133,.12); color: var(--rose); }
+  .r-orange { background: rgba(249,115,22,.12); color: var(--orange); }
+
+  /* ---------- order flow ---------- */
+  .pipeline { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0; align-items: stretch; }
+  .step { position: relative; padding: 0 18px 0 6px; }
+  .step:not(:last-child)::after {
+    content: "→"; position: absolute; right: 2px; top: 42%; color: var(--amber); font-size: 15px;
+  }
+  .step .n {
+    width: 26px; height: 26px; border-radius: 50%; background: var(--amber); color: #1c1917;
+    font-weight: 800; font-size: 13px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px;
+  }
+  .step b { font-size: 13px; display: block; margin-bottom: 3px; }
+  .step small { color: var(--muted); font-size: 11.5px; line-height: 1.45; display: block; }
+
+  /* ---------- tech stack ---------- */
+  .tech-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .tech {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px;
+  }
+  .tech h3 { font-size: 15px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .tech h3 .ico { font-size: 17px; }
+  .pills { display: flex; flex-wrap: wrap; gap: 7px; }
+  .pill {
+    font-size: 12px; padding: 4px 11px; border-radius: 99px; border: 1px solid var(--line);
+    background: var(--card-2); color: var(--fg); white-space: nowrap;
+  }
+  .pill b { color: var(--amber); font-weight: 650; }
+
+  /* ---------- practices ---------- */
+  .practices { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .practice {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px;
+  }
+  .practice h3 { font-size: 15.5px; margin-bottom: 6px; display: flex; gap: 9px; align-items: baseline; }
+  .practice h3 .em { color: var(--amber); }
+  .practice p { font-size: 13.5px; color: var(--muted); }
+  .practice p code { font-family: var(--mono); font-size: 12px; color: var(--fg); background: var(--card-2); padding: 1px 5px; border-radius: 5px; }
+
+  /* ---------- conclusion / owner benefits ---------- */
+  .roi-banner {
+    border: 1.5px solid rgba(245,158,11,.6); border-radius: 16px;
+    background: linear-gradient(180deg, rgba(245,158,11,.12), rgba(245,158,11,.03));
+    padding: 22px 26px; margin-top: 18px; text-align: center;
+  }
+  .roi-banner .big { font-size: clamp(17px, 2.4vw, 22px); font-weight: 800; }
+  .roi-banner .big em { color: var(--amber); font-style: normal; }
+  .roi-banner .sub { color: var(--muted); font-size: 13.5px; margin-top: 6px; }
+  .cost-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .cost-table th {
+    text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); padding: 8px 12px; border-bottom: 1px solid var(--line);
+  }
+  .cost-table td { padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .cost-table td:last-child { white-space: nowrap; color: var(--amber); font-weight: 650; }
+  .cost-table tr:last-child td { border-bottom: none; font-weight: 700; }
+  .cost-table tr:last-child td:first-child { color: var(--fg); }
+  .fine { color: var(--muted); font-size: 12px; margin-top: 14px; font-style: italic; }
+
+  footer {
+    margin-top: 64px; border-top: 1px solid var(--line); padding: 26px 0 40px;
+    color: var(--muted); font-size: 13px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+  }
+  footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; width: 100%; }
+  footer b { color: var(--fg); }
+
+  @media (max-width: 980px) {
+    .boxes.c6, .boxes.c5 { grid-template-columns: repeat(3, 1fr); }
+    .boxes.c4 { grid-template-columns: repeat(2, 1fr); }
+    .surfaces, .tech-grid { grid-template-columns: repeat(2, 1fr); }
+    .pipeline { grid-template-columns: repeat(4, 1fr); row-gap: 22px; }
+  }
+  @media (max-width: 640px) {
+    .wrap { padding: 0 18px; }
+    .boxes.c6, .boxes.c5, .boxes.c4, .boxes.c3 { grid-template-columns: 1fr 1fr; }
+    .surfaces, .tech-grid, .practices { grid-template-columns: 1fr; }
+    .pipeline { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="brand-mark">SliceMatic · FDE Academy · Group 3</div>
+    <h1>AI-Powered Pizza Ordering <span class="accent">Platform Architecture</span></h1>
+    <p class="tagline">
+      A single-outlet pizza brand run end-to-end by software: customers order by
+      <b>chat or live voice call</b> in English or Hindi, staff run a POS kiosk, the kitchen gets a
+      live display, riders get a delivery queue, and the owner gets a full admin console —
+      all driven by one frozen, deterministic pricing brain.
+    </p>
+    <div class="stats">
+      <div class="stat"><b>6</b><span>User surfaces</span></div>
+      <div class="stat"><b>~40K</b><span>Lines of code</span></div>
+      <div class="stat"><b>199</b><span>Automated tests</span></div>
+      <div class="stat"><b>33</b><span>PRs merged</span></div>
+      <div class="stat"><b>118</b><span>Commits</span></div>
+      <div class="stat"><b>2</b><span>Languages (EN/HI)</span></div>
+    </div>
+  </div>
+</header>
+
+<!-- =============================== HIGH-LEVEL FLOW =============================== -->
+<section id="overview">
+  <div class="wrap">
+    <div class="kicker">The Big Picture</div>
+    <h2>High-Level System Flow</h2>
+    <p class="lede">
+      How every screen connects: an order enters from the customer app or the staff counter,
+      is priced and validated by one shared engine, lands in one orders store — and from there
+      flows across the kitchen, delivery, and tracking screens in real time, with admin and ops
+      watching the whole pipeline.
+    </p>
+
+    <div class="layer">
+      <div class="fc">
+        <!-- entry points -->
+        <div class="fc-entries">
+          <div class="fc-node cust">
+            <span class="tag r-amber">Customer App</span>
+            <b>Chat · Voice Call · Menu + Cart</b>
+            <small>Customer orders conversationally (EN/HI) or browses the menu and checks out</small>
+          </div>
+          <div class="fc-node">
+            <span class="tag r-blue">Staff POS</span>
+            <b>Walk-in Counter Orders</b>
+            <small>Staff key in orders at the kiosk for in-store customers</small>
+          </div>
+        </div>
+
+        <!-- merge -->
+        <div class="fc-merge"></div>
+        <div class="fc-drop"><span class="head">▼</span><span class="lbl">all orders converge on one backend</span></div>
+
+        <!-- backend -->
+        <div class="fc-node sys fc-spine">
+          <span class="tag r-purple">FastAPI Backend</span>
+          <b>AI Agent + Guardrails &nbsp;·&nbsp; core/ Pricing Engine</b>
+          <small>The LLM converses; the deterministic engine computes every rupee and validates every field</small>
+        </div>
+
+        <div class="fc-drop"><div class="stem"></div><span class="head">▼</span><span class="lbl">saved only after validation + customer confirmation</span></div>
+
+        <!-- orders store + observers -->
+        <div class="fc-row3">
+          <div class="fc-node db">
+            <span class="tag r-rose">Single Source of Truth</span>
+            <b>Supabase — orders</b>
+            <small>One order row: items, totals, source (chat / voice / app / POS), status timestamps</small>
+          </div>
+          <div class="fc-side">
+            <div class="dash"></div>
+            <div class="fc-node">
+              <b>Admin Console + Ops Dashboard</b>
+              <small>Watch everything: sales, inventory, staff · AI sessions, costs, escalations</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="fc-drop"><div class="stem"></div><span class="head">▼</span><span class="lbl">new order appears live</span></div>
+
+        <!-- kitchen -->
+        <div class="fc-node fc-spine">
+          <span class="tag r-green">Kitchen Display</span>
+          <b>Preparing → Ready</b>
+          <small>Kitchen staff advance status; every change is timestamped in the DB</small>
+        </div>
+
+        <div class="fc-drop"><div class="stem"></div><span class="head">▼</span><span class="lbl">marked ready → picked up</span></div>
+
+        <!-- delivery -->
+        <div class="fc-node fc-spine">
+          <span class="tag r-orange">Delivery Rider App</span>
+          <b>Out for Delivery → Delivered</b>
+          <small>Rider sees the queue with addresses and closes out the order</small>
+        </div>
+
+        <div class="fc-drop"><div class="stem"></div><span class="head">▼</span><span class="lbl">status flows back to the customer</span></div>
+
+        <!-- tracking -->
+        <div class="fc-node cust fc-spine">
+          <span class="tag r-amber">Customer App — Orders Tab</span>
+          <b>Live Order Tracking</b>
+          <small>The customer follows their pizza from “received” to “delivered” on the same phone they ordered from</small>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =============================== ARCHITECTURE =============================== -->
+<section id="architecture">
+  <div class="wrap">
+    <div class="kicker">System Design</div>
+    <h2>Layered Architecture</h2>
+    <p class="lede">
+      Every layer is <b>additive</b>: the deterministic core works alone, and each layer above it
+      (API, AI, database, frontend) can fail or be removed without breaking the layer below.
+      All money and menu decisions funnel into one pure-Python engine.
+    </p>
+
+    <div class="layer">
+      <div class="layer-label"><span class="dot" style="background:var(--blue)"></span>
+        <span class="name">Clients — six independent surfaces</span>
+        <span class="desc">Next.js route groups, each with its own layout, login gate &amp; components — zero cross-imports</span>
+      </div>
+      <div class="boxes c6">
+        <div class="node hl"><b>Customer App</b><small>Chat + voice ordering, menu, cart, checkout, order tracking (phone-frame)</small></div>
+        <div class="node"><b>Staff POS</b><small>Kiosk order entry: menu → customize → payment → ticket</small></div>
+        <div class="node"><b>Kitchen Display</b><small>Live order queue with status &amp; type filters</small></div>
+        <div class="node"><b>Delivery App</b><small>Rider queue, delivery addresses, status updates</small></div>
+        <div class="node"><b>Admin Console</b><small>11 modules: analytics, inventory, staff, coupons…</small></div>
+        <div class="node"><b>Ops Dashboard</b><small>AI observability: sessions, costs, escalations, scores</small></div>
+      </div>
+    </div>
+
+    <div class="flow-arrow"><span class="arr">▼</span> HTTPS · JSON · JWT bearer auth · WebSocket (voice) <span class="arr">▼</span></div>
+
+    <div class="layer">
+      <div class="layer-label"><span class="dot" style="background:var(--green)"></span>
+        <span class="name">API Gateway — FastAPI</span>
+        <span class="desc">one service (<code style="font-family:var(--mono)">ai.main</code>) mounts every router · CORS · role-based access on every protected route</span>
+      </div>
+      <div class="boxes c6">
+        <div class="node"><b>/api/*</b><small>Menu, cart pricing, checkout, orders, analytics</small></div>
+        <div class="node"><b>/api/auth/*</b><small>Signup, login, JWT, profile &amp; address</small></div>
+        <div class="node hl"><b>/chat</b><small>Conversational ordering endpoint</small></div>
+        <div class="node hl"><b>/voice/* + WS /voice/call</b><small>STT → agent → TTS; real-time call over WebSocket</small></div>
+        <div class="node"><b>/staff/*</b><small>POS + kitchen APIs (11 endpoints)</small></div>
+        <div class="node"><b>/admin/*</b><small>Owner/ops APIs (51 endpoints)</small></div>
+      </div>
+    </div>
+
+    <div class="flow-arrow"><span class="arr">▼</span> in-process calls — no HTTP between layers <span class="arr">▼</span></div>
+
+    <div class="layer">
+      <div class="layer-label"><span class="dot" style="background:var(--purple)"></span>
+        <span class="name">AI Orchestration Layer — <code style="font-family:var(--mono)">ai/</code></span>
+        <span class="desc">the agent orchestrates; it never computes money and never invents menu items</span>
+      </div>
+      <div class="boxes c5">
+        <div class="node hl"><b>Agent Loop</b><small>Staged system prompt, ≤5 tool rounds, temp 0.2, model fallback chain</small></div>
+        <div class="node"><b>Stage-Gated Tools</b><small>Tools appear only when the conversation stage allows them (e.g. save only after a priced bill)</small></div>
+        <div class="node"><b>Guardrails</b><small>Input: heuristics + cheap-LLM classifier (fail-open). Output: core validation before any write</small></div>
+        <div class="node"><b>Language + Session</b><small>Per-turn EN/HI detection; in-memory sessions mirrored to DB</small></div>
+        <div class="node"><b>Voice Pipeline</b><small>Deepgram STT · Sarvam TTS · filler phrases mask latency · 3-min cap</small></div>
+      </div>
+    </div>
+
+    <div class="flow-arrow"><span class="arr">▼</span> tools import and call the real core functions <span class="arr">▼</span></div>
+
+    <div class="core-banner">
+      <div class="layer-label"><span class="dot" style="background:var(--amber)"></span>
+        <span class="name">Deterministic Core — <code style="font-family:var(--mono)">core/</code> (the frozen brain)</span>
+        <span class="desc">pure Python · zero web/DB/LLM imports · the ONLY place money is computed</span>
+      </div>
+      <div class="boxes c5">
+        <div class="node"><b>menu.py</b><small>Defensive parsing of swappable menu files — never crashes on malformed input</small></div>
+        <div class="node"><b>validation.py</b><small>Name, phone, quantity, selection, payment — every input re-prompted, never raised</small></div>
+        <div class="node hl"><b>pricing.py</b><small>Exact engine: unit → subtotal → 10% bulk discount → 18% GST → total</small></div>
+        <div class="node"><b>persistence.py</b><small>Pipe-separated, parseable orders_log.txt (graded output)</small></div>
+        <div class="node"><b>analytics.py</b><small>Pandas order analytics: daily / weekly / monthly rollups</small></div>
+      </div>
+    </div>
+
+    <div class="flow-arrow"><span class="arr">▼</span> best-effort writes with retry — a DB outage never blocks an order <span class="arr">▼</span></div>
+
+    <div class="layer">
+      <div class="layer-label"><span class="dot" style="background:var(--rose)"></span>
+        <span class="name">Data &amp; External Services</span>
+        <span class="desc">Supabase Postgres is the system of record for API orders; the graded .txt log stays independent</span>
+      </div>
+      <div class="boxes c5">
+        <div class="node"><b>Supabase (Postgres)</b><small>Orders, users &amp; roles, sessions, messages, escalations, inventory, coupons, feedback — 22 versioned migrations</small></div>
+        <div class="node"><b>OpenRouter</b><small>Gemini 2.5 Flash → Claude Haiku 4.5 → GPT-4o-mini fallback</small></div>
+        <div class="node"><b>Deepgram Nova-2</b><small>Bilingual speech-to-text (language=multi)</small></div>
+        <div class="node"><b>Sarvam AI</b><small>Streaming text-to-speech for Indian languages</small></div>
+        <div class="node"><b>Langfuse</b><small>Traces every LLM call: model, tokens, cost, tool calls</small></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =============================== ORDER FLOW =============================== -->
+<section id="flow">
+  <div class="wrap">
+    <div class="kicker">How an AI order works</div>
+    <h2>Chat / Voice Order Flow</h2>
+    <p class="lede">The LLM converses; deterministic code decides. Nothing is saved until the guardrail passes <i>and</i> the customer confirms.</p>
+    <div class="layer">
+      <div class="pipeline">
+        <div class="step"><span class="n">1</span><b>Message in</b><small>Text, or voice transcribed by Deepgram over the live call</small></div>
+        <div class="step"><span class="n">2</span><b>Input guardrail</b><small>Blocks prompt injection &amp; abuse; detects EN/HI per turn</small></div>
+        <div class="step"><span class="n">3</span><b>Agent + LLM</b><small>Live menu in prompt; stage decides which tools it may call</small></div>
+        <div class="step"><span class="n">4</span><b>Price via core</b><small><span style="font-family:var(--mono); font-size:11px">compute_bill()</span> — engine computes, LLM only reads the result</small></div>
+        <div class="step"><span class="n">5</span><b>Bill injection</b><small>Bill UI pushed straight to the frontend, bypassing LLM generation</small></div>
+        <div class="step"><span class="n">6</span><b>Confirm + validate</b><small>Output guardrail re-validates name, phone, items, qty before any write</small></div>
+        <div class="step"><span class="n">7</span><b>Persist + trace</b><small>Order saved to Supabase; full trace in Langfuse; kitchen sees it live</small></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =============================== SCREENS =============================== -->
+<section id="screens">
+  <div class="wrap">
+    <div class="kicker">Screen Inventory</div>
+    <h2>Every Surface, Every Screen</h2>
+    <p class="lede">
+      Each surface is a Next.js <b>route group</b> with its own layout, its own login gate, and its own
+      component tree — a teammate can rebuild one surface without touching the others.
+    </p>
+    <div class="surfaces">
+      <div class="surface">
+        <span class="role r-amber">Customer · phone frame</span>
+        <h3>Customer App</h3>
+        <div class="idiom">Phone + 6-digit PIN · mobile-first, framed on desktop</div>
+        <ul>
+          <li><b>Chat Home</b> <span>— conversational ordering with quick replies + live voice call button</span></li>
+          <li><b>Menu</b> <span>— browse tiles → inline build sheet (base → pizza → 1–3 toppings → qty), live-priced</span></li>
+          <li><b>Cart</b> <span>— global inline sheet, reachable from any screen</span></li>
+          <li><b>Checkout</b> <span>— dedicated route (deliberate for payment); COD / UPI, address enforced for delivery</span></li>
+          <li><b>Orders</b> <span>— live status tracking per signed-in user</span></li>
+          <li><b>Profile</b> <span>— account, saved addresses, theme switcher</span></li>
+        </ul>
+      </div>
+      <div class="surface">
+        <span class="role r-blue">Staff · desktop kiosk</span>
+        <h3>Staff POS</h3>
+        <div class="idiom">Employee ID + PIN · walk-in counter orders</div>
+        <ul>
+          <li><b>POS Menu</b> <span>— fast item grid for order taking</span></li>
+          <li><b>Customize</b> <span>— base / toppings / quantity per line</span></li>
+          <li><b>Customer details</b> <span>— validated name &amp; phone capture</span></li>
+          <li><b>Payment</b> <span>— cash / UPI with core-priced bill</span></li>
+          <li><b>Confirmation + ticket</b> <span>— printable order ticket</span></li>
+          <li><b>Recent orders</b> <span>— today's counter history</span></li>
+        </ul>
+      </div>
+      <div class="surface">
+        <span class="role r-green">Kitchen · wall display</span>
+        <h3>Kitchen Display</h3>
+        <div class="idiom">Employee ID + PIN · always-on queue</div>
+        <ul>
+          <li><b>Live order queue</b> <span>— new orders appear as they're placed (chat, voice, app, POS)</span></li>
+          <li><b>Status + type filters</b> <span>— dine-in / delivery / pickup lanes</span></li>
+          <li><b>Status advance</b> <span>— received → preparing → ready, timestamped in DB</span></li>
+        </ul>
+      </div>
+      <div class="surface">
+        <span class="role r-orange">Delivery · phone frame</span>
+        <h3>Delivery Rider App</h3>
+        <div class="idiom">Employee ID + PIN · on-the-road view</div>
+        <ul>
+          <li><b>Order queue</b> <span>— newest first, delivery address prominent</span></li>
+          <li><b>Status updates</b> <span>— out-for-delivery → delivered</span></li>
+        </ul>
+      </div>
+      <div class="surface">
+        <span class="role r-purple">Admin · desktop web</span>
+        <h3>Admin Console</h3>
+        <div class="idiom">Email + password (seeded, no public signup)</div>
+        <ul>
+          <li><b>Dashboard</b> <span>— KPIs &amp; charts (Recharts)</span></li>
+          <li><b>Orders / Payments / Pricing</b> <span>— ops management, runtime discount control</span></li>
+          <li><b>Menu &amp; Inventory</b> <span>— items, sides, festival coupons; recipe-based stock deductions</span></li>
+          <li><b>Staff</b> <span>— create employees with roles, reset PINs, deactivate</span></li>
+          <li><b>Analytics &amp; AI Insights</b> <span>— sales trends, recommendation events, feedback sentiment</span></li>
+          <li><b>Audit logs / Notifications / Settings</b> <span>— governance &amp; configuration</span></li>
+        </ul>
+      </div>
+      <div class="surface">
+        <span class="role r-rose">Ops · desktop web</span>
+        <h3>AI Observability Dashboard</h3>
+        <div class="idiom">Role-gated · powered by Langfuse traces</div>
+        <ul>
+          <li><b>Summary</b> <span>— sessions, token usage, model cost (USD)</span></li>
+          <li><b>Session explorer</b> <span>— drill into any conversation turn-by-turn</span></li>
+          <li><b>Escalations</b> <span>— every human-handoff with a link to its trace</span></li>
+          <li><b>Quality scores</b> <span>— evaluation scores across conversations</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =============================== TECH STACK =============================== -->
+<section id="stack">
+  <div class="wrap">
+    <div class="kicker">Technologies</div>
+    <h2>Technology Stack</h2>
+    <p class="lede">Modern, boring-on-purpose choices: a typed frontend, an async Python backend, and managed AI/data services.</p>
+    <div class="tech-grid">
+      <div class="tech">
+        <h3><span class="ico">🖥️</span> Frontend</h3>
+        <div class="pills">
+          <span class="pill"><b>Next.js 15</b> App Router</span>
+          <span class="pill"><b>React 19</b></span>
+          <span class="pill"><b>TypeScript 5</b></span>
+          <span class="pill"><b>Tailwind CSS v4</b></span>
+          <span class="pill">Radix UI primitives</span>
+          <span class="pill">Zustand state</span>
+          <span class="pill">Framer Motion</span>
+          <span class="pill">Recharts</span>
+          <span class="pill">Lucide icons</span>
+        </div>
+      </div>
+      <div class="tech">
+        <h3><span class="ico">⚙️</span> Backend</h3>
+        <div class="pills">
+          <span class="pill"><b>Python 3.12</b></span>
+          <span class="pill"><b>FastAPI</b> + Uvicorn</span>
+          <span class="pill">WebSockets (live voice)</span>
+          <span class="pill">Gradio (graded UI)</span>
+          <span class="pill">Pandas analytics</span>
+          <span class="pill"><b>uv</b> package manager</span>
+        </div>
+      </div>
+      <div class="tech">
+        <h3><span class="ico">🧠</span> AI &amp; Voice</h3>
+        <div class="pills">
+          <span class="pill"><b>OpenRouter</b> tool calling</span>
+          <span class="pill">Gemini 2.5 Flash</span>
+          <span class="pill">Claude Haiku 4.5 (fallback)</span>
+          <span class="pill">GPT-4o-mini (fallback)</span>
+          <span class="pill"><b>Deepgram Nova-2</b> STT</span>
+          <span class="pill"><b>Sarvam AI</b> TTS</span>
+          <span class="pill"><b>Langfuse</b> observability</span>
+        </div>
+      </div>
+      <div class="tech">
+        <h3><span class="ico">🗄️</span> Data &amp; Auth</h3>
+        <div class="pills">
+          <span class="pill"><b>Supabase</b> Postgres</span>
+          <span class="pill">psycopg 3</span>
+          <span class="pill">22 SQL migrations</span>
+          <span class="pill"><b>bcrypt</b> password hashing</span>
+          <span class="pill"><b>JWT</b> (HS256) + role guards</span>
+          <span class="pill">Login lockout (5 fails → 15 min)</span>
+        </div>
+      </div>
+      <div class="tech">
+        <h3><span class="ico">🧪</span> Quality Tooling</h3>
+        <div class="pills">
+          <span class="pill"><b>pytest</b> · 199 tests</span>
+          <span class="pill">Playwright</span>
+          <span class="pill">pre-commit hooks</span>
+          <span class="pill">black + isort</span>
+          <span class="pill">ruff lint</span>
+          <span class="pill"><b>bandit</b> security scan</span>
+          <span class="pill">ESLint</span>
+        </div>
+      </div>
+      <div class="tech">
+        <h3><span class="ico">🚀</span> CI / CD &amp; Deploy</h3>
+        <div class="pills">
+          <span class="pill"><b>GitHub Actions</b></span>
+          <span class="pill">PR checks: tests gate merge</span>
+          <span class="pill">Auto-sync to Hugging Face</span>
+          <span class="pill">Docker (HF Spaces)</span>
+          <span class="pill">Persistent /data volume</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =============================== PRACTICES =============================== -->
+<section id="practices">
+  <div class="wrap">
+    <div class="kicker">Engineering Discipline</div>
+    <h2>Best Practices We Applied</h2>
+    <p class="lede">The practices that made a ~40,000-line, 6-surface system stay stable while being built by multiple contributors (human and AI) across 118 commits and 33 merged pull requests.</p>
+    <div class="practices">
+      <div class="practice">
+        <h3><span class="em">01</span> Pure, frozen core (single source of truth)</h3>
+        <p><code>core/</code> has zero web, DB, or LLM imports. Every surface — Gradio, REST, POS, the AI agent — calls the <i>same</i> pricing and validation functions in-process. One brain, many faces: money can never be computed two different ways.</p>
+      </div>
+      <div class="practice">
+        <h3><span class="em">02</span> Additive layering &amp; graceful degradation</h3>
+        <p>Every new layer is additive: the graded app runs with nothing but menu files; DB writes are best-effort with retry; observability failures never reach a customer. Removing any upper layer leaves a working system.</p>
+      </div>
+      <div class="practice">
+        <h3><span class="em">03</span> The LLM never computes money</h3>
+        <p>The agent orchestrates but all arithmetic goes through <code>compute_bill()</code>. Tools are <b>stage-gated</b> — the model can't even see "save order" until a bill has been priced and is awaiting confirmation. Deterministic outputs (bills, confirmations) are injected into the UI, bypassing token generation.</p>
+      </div>
+      <div class="practice">
+        <h3><span class="em">04</span> Guardrails on both sides of the model</h3>
+        <p>Input: heuristics + a cheap LLM classifier block injection and abuse (fail-open so a classifier outage never blocks ordering). Output: before any write, the order is re-validated by the same <code>core/validation</code> rules the graded app uses.</p>
+      </div>
+      <div class="practice">
+        <h3><span class="em">05</span> Defensive input handling everywhere</h3>
+        <p>Menu files can be swapped or corrupted; users type "three" as a quantity. Every validator returns <code>(ok, value | message)</code> and callers re-prompt — nothing raises, nothing crashes. All eight graded edge cases are pinned by tests.</p>
+      </div>
+      <div class="practice">
+        <h3><span class="em">06</span> Tests that run anywhere</h3>
+        <p>199 tests run with <b>no API keys and no database</b> — lazy config plus monkeypatched in-memory fakes. A pricing regression test pins the exact graded bill (₹3,594.87) so the engine can never drift silently.</p>
+      </div>
+      <div class="practice">
+        <h3><span class="em">07</span> Security by default</h3>
+        <p>bcrypt-only credential hashes, HS256 JWTs with per-endpoint <code>require_role()</code> guards, 5-failure login lockout for 6-digit PINs, bandit static scans on every commit, and secrets kept in <code>.env</code> — never in git.</p>
+      </div>
+      <div class="practice">
+        <h3><span class="em">08</span> Isolation as an architecture rule</h3>
+        <p>Frontend surfaces live in separate route groups that never import from each other; shared modules (<code>components/ui</code>, <code>lib/api.ts</code>) are additive-only. One surface can be rebuilt — even by a different developer or an LLM — without risk to the rest.</p>
+      </div>
+      <div class="practice">
+        <h3><span class="em">09</span> Design tokens, not hex codes</h3>
+        <p>All colors are semantic CSS variables per <code>[data-theme]</code>; components read tokens like <code>bg-primary</code>. Swapping the entire brand palette is a one-attribute change — proven live when the default theme changed with a 3-line diff.</p>
+      </div>
+      <div class="practice">
+        <h3><span class="em">10</span> Full observability &amp; resilience for AI</h3>
+        <p>Every LLM call is traced in Langfuse (model, tokens, cost, tool calls) and surfaced in an in-house ops dashboard. A three-model fallback chain (Gemini → Claude → GPT) plus a capped tool loop means a provider outage degrades to an apology, never a crash.</p>
+      </div>
+      <div class="practice">
+        <h3><span class="em">11</span> Versioned schema migrations</h3>
+        <p>22 numbered SQL migrations evolve the database from first schema to inventory, coupons, and sentiment — reviewable, ordered, and reproducible in any environment.</p>
+      </div>
+      <div class="practice">
+        <h3><span class="em">12</span> CI-gated, convention-driven delivery</h3>
+        <p>Feature-branch workflow with 30+ reviewed PRs; GitHub Actions runs the full test suite on every PR (failing tests block merge) and auto-deploys <code>master</code> to Hugging Face Spaces. Pre-commit formatting, linting, and security scans keep every commit clean.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =============================== CONCLUSION =============================== -->
+<section id="conclusion">
+  <div class="wrap">
+    <div class="kicker">Conclusion — Why It Matters</div>
+    <h2>What Mr. Rajan Sharma Gets</h2>
+    <p class="lede">
+      SliceMatic's founder runs one outlet in New Ashok Nagar doing ~47 orders/day at a ₹847 average
+      order value (~₹9.96L/month net revenue, ₹644 contribution per order — Stage 1 unit economics).
+      Here is what this platform changes for him, in his numbers.
+    </p>
+
+    <div class="practices">
+      <div class="practice">
+        <h3><span class="em">₹</span> His own channel — zero commission</h3>
+        <p>Aggregators take 25–30% of every delivery order. His projected delivery revenue is
+        ~₹6.6L/month — routed through Swiggy/Zomato that's <code>₹1.7–2L/month</code> in commission.
+        Orders through his own chat, voice, and app channels keep all of it.</p>
+      </div>
+      <div class="practice">
+        <h3><span class="em">₹</span> An order-taker that costs ~₹2 per order</h3>
+        <p>Today one counter + billing staffer (<code>₹18,000/month</code> — his 3rd biggest salary)
+        answers the phone and keys in orders: ~₹13 of labour per order, one call at a time, during
+        shop hours only. The AI takes orders by chat and live voice, in Hindi and English, 24/7,
+        at <code>₹1–2 per conversation</code> — and frees that person to serve walk-ins.</p>
+      </div>
+      <div class="practice">
+        <h3><span class="em">₹</span> Every bill exact, zero leakage</h3>
+        <p>One frozen engine computes every price — 10% bulk discount, 18% GST, 2-decimal rounding —
+        across chat, voice, app, and counter. No mis-keyed bills, no "special price" at the counter,
+        no GST arithmetic mistakes at tax time.</p>
+      </div>
+      <div class="practice">
+        <h3><span class="em">📊</span> No more operating blind</h3>
+        <p>His Stage 1 pain point was <i>"no data — operating blind on unit economics."</i> Now every
+        order is a structured record: sales analytics, item mix, feedback sentiment, and AI insights
+        in the admin console — the data to steer the menu toward high-margin items.</p>
+      </div>
+      <div class="practice">
+        <h3><span class="em">🛡️</span> Tighter operations, less shrinkage</h3>
+        <p>Role-gated accounts for staff, kitchen, and riders; timestamped status at every hand-off;
+        recipe-based inventory deductions and audit logs. He can see exactly where every order and
+        every ingredient went — from home.</p>
+      </div>
+      <div class="practice">
+        <h3><span class="em">🗣️</span> The whole neighbourhood can order</h3>
+        <p>Voice calls and Hindi support mean customers who would never install an app or type in
+        English can still order directly. Escalation to a human is one sentence away, so nobody
+        gets stuck talking to a machine.</p>
+      </div>
+    </div>
+
+    <div class="layer" style="margin-top:18px">
+      <div class="layer-label"><span class="dot" style="background:var(--amber)"></span>
+        <span class="name">What it costs him to run</span>
+        <span class="desc">estimated monthly operating cost at full volume (~1,400 orders/month)</span>
+      </div>
+      <table class="cost-table">
+        <tr><th>Item</th><th>Detail</th><th>Monthly (est.)</th></tr>
+        <tr><td>LLM (Gemini 2.5 Flash via OpenRouter)</td><td>~₹1–2 per AI-taken order, even if every order goes through AI</td><td>~₹2,500</td></tr>
+        <tr><td>Voice (Deepgram STT + Sarvam TTS)</td><td>~₹2–3 per call, calls capped at 3 minutes</td><td>~₹1,000</td></tr>
+        <tr><td>Database (Supabase)</td><td>Free tier today; Pro tier at scale</td><td>₹0–2,100</td></tr>
+        <tr><td>Observability (Langfuse) + hosting</td><td>Free tiers (Hugging Face Spaces)</td><td>~₹0</td></tr>
+        <tr><td>Total software run cost</td><td>&lt; 0.1% of monthly revenue</td><td>~₹3,500–5,600</td></tr>
+      </table>
+    </div>
+
+    <div class="roi-banner">
+      <div class="big">Runs for <em>&lt;0.1% of revenue</em> — vs the 25–30% an aggregator takes.
+      At ₹644 contribution per order, <em>~8 extra orders a month</em> cover the entire software bill.</div>
+      <div class="sub">Build cost: developed as a staged FDE Academy project on free tiers — cash outlay ≈ API credits.
+      A comparable agency build of a 6-surface AI ordering platform would quote ₹15–25L; this stack reaches break-even on that within a year from commission savings alone.</div>
+    </div>
+
+    <p class="fine">Revenue, contribution, and cost figures are from the Stage 1 Business Unit Economics
+    (60% capacity plan). Software run costs are estimates from current provider pricing at plan volume.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div><b>SliceMatic / PizzaFlow</b> — FDE Academy Applied Project, Group 3</div>
+    <div>Stack: Next.js 15 · FastAPI · OpenRouter · Supabase · Langfuse · Hugging Face Spaces</div>
+  </div>
+</footer>
+
+</body>
+</html>
